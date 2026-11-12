@@ -18,10 +18,11 @@ const ASSETS = path.join(__dirname, '..', 'assets');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // 自检模式使用独立数据目录，绝不碰用户真实曲库
-const SELF_TEST = process.argv.some(a => ['--deck-fav', '--deck-deltest', '--deck-jumptest', '--deck-chtest', '--deck-singletest', '--deck-uitest', '--deck-modetest', '--deck-minitest', '--deck-imptest', '--deck-selecttest', '--deck-losttest', '--deck-sorttest', '--deck-looptest', '--deck-fqtest', '--deck-summontest', '--deck-repro'].includes(a));
+const PACK_CHECK = process.argv.includes('--deck-packcheck');
+const SELF_TEST = PACK_CHECK || process.argv.some(a => ['--deck-fav', '--deck-deltest', '--deck-jumptest', '--deck-chtest', '--deck-singletest', '--deck-uitest', '--deck-modetest', '--deck-minitest', '--deck-imptest', '--deck-selecttest', '--deck-losttest', '--deck-sorttest', '--deck-looptest', '--deck-fqtest', '--deck-summontest', '--deck-repro'].includes(a));
 if (SELF_TEST) {
   const os = require('os');
-  const _dir = path.join(os.tmpdir(), 'albumdeck-favtest');
+  const _dir = PACK_CHECK ? fs.mkdtempSync(path.join(os.tmpdir(), 'albumdeck-packcheck-')) : path.join(os.tmpdir(), 'albumdeck-favtest');
   app.setPath('userData', _dir);
   try { fs.rmSync(path.join(_dir, 'album-deck.json'), { force: true }); } catch (_) {}
   // 复现用：把真实曲库复制进隔离目录，不碰用户数据
@@ -1640,6 +1641,26 @@ if (!gotLock) {
       store.patch({ current: { albumId: store.albums[0] ? store.albums[0].id : null, trackIndex: 0 } });
     }
     rebuildQueue();   // 初始化播放队列
+    // 打包验证：只加载隐藏主页面，使用隔离曲库，不连接真实浏览器或注册全局快捷键。
+    if (PACK_CHECK) {
+      registerIpc();
+      const checkWindow = new BrowserWindow({ show: false, webPreferences: {
+        preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false
+      } });
+      checkWindow.loadFile(path.join(__dirname, 'index.html')).then(async () => {
+        const state = await checkWindow.webContents.executeJavaScript('window.deck.state()');
+        let rows = 0;
+        for (let i = 0; i < 30; i++) {
+          rows = await checkWindow.webContents.executeJavaScript('document.querySelectorAll("#albumList .album-item").length');
+          if (rows === state.albums.length && rows > 0) break;
+          await sleep(100);
+        }
+        if (!state.albums.length || rows !== state.albums.length) throw new Error('主页面未正常渲染曲库');
+        console.log('PACK_CHECK_OK', JSON.stringify({ version: app.getVersion(), albums: state.albums.length, rows }));
+        app.exit(0);
+      }).catch(error => { console.error('PACK_CHECK_FAILED', error); app.exit(1); });
+      return;
+    }
     conn.port = settings().port || 9222;
     registerIpc();
     createMain();

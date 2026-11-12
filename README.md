@@ -1,4 +1,4 @@
-# AlbumDeck · 唱片台 <sub>v0.13</sub>
+# AlbumDeck · 唱片台 <sub>v0.15</sub>
 
 把 B 站的长视频（专辑 / 合集 / 演唱会）当成唱片来听：**时间戳点歌、切上一首下一首、切整张专辑、全局快捷键**，全部作用在你平常用的那个浏览器窗口里。
 
@@ -6,7 +6,7 @@
 
 ![主界面](assets/preview.png)
 
-[版本发布](https://github.com/kenaziuuu/AlbumDeck/releases) · [v0.13 更新说明](RELEASE_NOTES.md) · [♥ 支持作者](#支持作者)
+[版本发布](https://github.com/kenaziuuu/AlbumDeck/releases) · [v0.15 更新说明](RELEASE_NOTES.md) · [♥ 支持作者](#支持作者)
 
 ---
 
@@ -104,7 +104,7 @@ AlbumDeck 做三件事：
 | 项目 | 要求 |
 |---|---|
 | 系统 | Windows 10 / 11（主要在 Windows 上开发验证） |
-| 运行时 | Node.js 18+（仅首次 `npm install` 用） |
+| 运行时 | Windows 便携版无需安装 Node.js；源码运行和打包需要 Node.js 18+ |
 | 浏览器 | Chrome 或 Edge（会以调试端口 9222 启动一个独立窗口） |
 | 账号 | B 站账号（首次在新窗口里登录一次，之后自动记住） |
 
@@ -113,6 +113,18 @@ AlbumDeck 做三件事：
 ---
 
 ## 安装与启动
+
+### 普通用户：下载 Windows 便携版
+
+1. 打开 [GitHub Releases](https://github.com/kenaziuuu/AlbumDeck/releases)，下载附件 **`AlbumDeck-v0.15.0-windows-x64.zip`**。
+2. 将**整个压缩包解压**到一个文件夹，保留 `resources/`、`locales/`、DLL 等全部文件。
+3. 双击 **`AlbumDeck.exe`** 或 **`start.bat`** 启动，无需安装 Node.js，也无需运行 `npm install`。
+
+GitHub 自动提供的 **`Source code (zip)`** 和仓库页面的 **`Download ZIP`** 是源码包，不包含 Electron 运行环境；运行源码请按下面的方法安装依赖。
+
+### 开发者：从源码运行
+
+先安装 Node.js 18+，再执行：
 
 ```bash
 git clone https://github.com/kenaziuuu/AlbumDeck.git
@@ -127,9 +139,18 @@ npm install
 
 第一次使用：点界面左上角 **「启动专用浏览器」** → 在新窗口里登录 B 站 → 回到 AlbumDeck 会自动连接（状态变绿）。
 
-**从旧版本升级：**从托盘菜单退出唱片台，更新源码、运行 `npm install`，再重新启动。关闭主窗口会隐藏到托盘，需要完整退出后再启动才能加载新代码。曲库、收藏夹与设置保存在 `%APPDATA%\album-deck\album-deck.json`，升级前可复制该文件备份。
+**从旧版本升级：**从托盘菜单退出唱片台，完整解压新版便携包后启动；源码用户更新代码后运行 `npm install` 再启动。关闭主窗口会隐藏到托盘，需要完整退出后再启动才能加载新代码。曲库、收藏夹与设置保存在 `%APPDATA%\album-deck\album-deck.json`，升级前可复制该文件备份。
 
-v0.13 的「切歌后自动播放」在新配置中默认不勾选；升级会保留已保存的选择。无论此项是否开启，应用每次启动连接 B 站后都会自动关闭网页的「自动切集」。
+「切歌后自动播放」在新配置中默认不勾选；升级会保留已保存的选择。无论此项是否开启，应用每次启动连接 B 站后都会自动关闭网页的「自动切集」。
+
+### 启动时提示找不到 electron.exe
+
+这说明 Electron 运行环境不在下载的目录中，通常是下载了源码 ZIP，或依赖安装未完成。
+
+- 普通用户：下载上面的 **Windows 便携版附件**，完整解压后启动。
+- 源码用户：在含 `package.json` 的目录执行 `npm install`；如果已安装依赖但仍缺少 `node_modules/electron/dist/electron.exe`，执行 `node node_modules/electron/install.js` 重新下载运行环境，然后再启动。
+
+`start.bat` 会在缺少依赖时显示安装方法和便携版下载地址，避免直接尝试打开不存在的文件。
 
 ---
 
@@ -232,6 +253,7 @@ AlbumDeck/
 │  ├─ mini-pop.html/css/js      悬浮窗弹出面板（收藏夹 / 顺序 / 播放列表）
 │  └─ tray.html/css/js          自定义托盘菜单
 ├─ tools/                启动器、自检脚本、图标与示例曲库生成
+│  └─ pack-win.js         Windows 便携包生成与启动验证
 ├─ assets/               图标、示例曲库、界面截图
 ├─ start.bat             Windows 一键启动
 ├─ RELEASE_NOTES.md      当前版本的 GitHub Release 发布说明
@@ -281,27 +303,36 @@ npm run repro            # 把真实曲库复制进隔离目录启动，输出 s
 
 **更新 GitHub 仓库：**
 
-本次 GitHub 发布标签为 `v0.13`，`package.json` 与锁文件使用完整包版本号 `0.13.0`。
+本次 GitHub 发布标签为 `v0.15`，`package.json` 与锁文件使用完整包版本号 `0.15.0`。创建发布前，先提交本地修改并推送到 `main`，确保标签指向包含本次修改的代码。
 
 ```bash
 npm run test:all
 npm run test:folder
 npm run test:pause-cdp
 git add .
-git commit -m "Release v0.13: fix playback defaults and history resume"
+git commit -m "Release v0.15: add standalone Windows portable package"
 git push origin main
-git tag -a v0.13 -m "AlbumDeck v0.13"
-git push origin v0.13
+git tag -a v0.15 -m "AlbumDeck v0.15"
+git push origin v0.15
 ```
 
-在 [GitHub Releases](https://github.com/kenaziuuu/AlbumDeck/releases) 创建对应 `v0.13` 标签的版本，标题填写 `AlbumDeck v0.13`，发布说明使用 [RELEASE_NOTES.md](RELEASE_NOTES.md) 的内容。GitHub 会为发布标签提供源码下载。
+在 [GitHub Releases](https://github.com/kenaziuuu/AlbumDeck/releases) 创建对应 `v0.15` 标签的版本，标题填写 `AlbumDeck v0.15`，发布说明使用 [RELEASE_NOTES.md](RELEASE_NOTES.md) 的内容。若通过网页新建标签，Target 选择已推送最新修改的 `main`。在页面底部的 **Attach binaries** 区域上传便携 ZIP，等待上传完成后，勾选 **Set as latest release**、不勾选 **This is a pre-release**，最后点击 **Publish release**。
 
-**分发给别人（当前是源码包形式）：**
+**生成 Windows 便携包并上传 Release：**
 
-1. 直接使用 Release 的源码包：对方解压后运行 `npm install`，再双击 `start.bat`
-2. 如需提供解压即用的 Windows 目录包：包含 `src/`、`assets/`、`tools/launch.js`、`package.json`、`package-lock.json`、`start.bat`、`LICENSE`、说明文档与已安装的 `node_modules/`，压缩后作为 Release 附件上传
+普通用户请使用包含运行环境的便携包。发布者在 Windows 上安装依赖后运行：
 
-> v0.13 尚未提供 `.exe` 安装包，当前以源码包或包含依赖的 Windows 目录包分发。
+```bash
+npm run pack:win
+```
+
+输出为 `dist/AlbumDeck-v0.15.0-windows-x64.zip` 及对应 `.sha256` 校验文件。打包会复制完整 Electron 运行环境、应用代码和生产依赖，并使用包内的 exe 在隐藏窗口中验证主进程、预加载桥和曲库渲染；验证时不使用开发机 PATH 中的 Node.js 或 npm，也不连接用户正在使用的浏览器。
+
+将生成的 **ZIP 文件上传到 GitHub Release 的附件**，供普通用户下载。`dist/` 和 `node_modules/` 继续由 `.gitignore` 排除，不提交到源码仓库。需要覆盖本地同版本打包产物时，运行 `npm run pack:win -- --force`。
+
+GitHub 自动附带的源码包仍可供开发者下载，但必须先安装 Node.js 并运行 `npm install`。
+
+> 便携版包含可直接运行的 `AlbumDeck.exe`，不需要安装向导；必须保留解压目录中的全部运行文件。
 
 ---
 
@@ -317,6 +348,14 @@ git push origin v0.13
 ---
 
 ## 版本记录
+
+### v0.15 — 2026-11-12
+
+- 新增 Windows 64 位便携包，包含完整 Electron 运行环境和生产依赖，普通用户无需安装 Node.js 或运行 `npm install`
+- 修复源码包直接运行 `start.bat` 时弹出找不到 `electron.exe` 的问题：缺少依赖时显示安装方法和便携版下载地址
+- 启动脚本同时支持便携目录中的 `AlbumDeck.exe` 和源码目录中的 Electron 运行时
+- 新增 `npm run pack:win`，自动打包并验证包内程序、主页面和预加载桥，生成 ZIP 与 SHA256 校验文件
+- 更新下载、升级和 GitHub Release 发布说明，明确区分便携版附件与 GitHub 自动生成的源码 ZIP
 
 ### v0.13 — 2026-11-12
 

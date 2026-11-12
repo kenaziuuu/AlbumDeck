@@ -1,10 +1,11 @@
 {
   "name": "album-deck",
-  "version": "0.13.0",
+  "version": "0.15.0",
   "description": "B 站长视频专辑的桌面播放控制器：时间戳点歌、切专辑、全局快捷键",
   "main": "src/main.js",
   "scripts": {
     "start": "node tools/launch.js",
+    "pack:win": "node tools/pack-win.js",
     "test:api": "node tools/test-import.js",
     "test:cdp": "node tools/test-cdp.js",
     "test:geo": "node tools/test-geometry.js",
