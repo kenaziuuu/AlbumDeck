@@ -254,12 +254,11 @@ git remote add origin <仓库地址>
 git push -u origin main
 ```
 
-**分发给别人（当前是源码包形式）：**
+**分发（当前是源码包形式）：**
 
-1. 打包整个目录（**包含 `node_modules`**，否则对方需要联网 `npm install`）
-2. 对方解压后双击 `start.bat` 即可运行
+解压后双击 `start.bat` 即可运行
 
-> v0.1 还没有做安装包（`.exe`）。如果要打安装包，需要额外引入 `electron-builder` 并配置 `build` 字段；当前未内置，避免把体积很大的构建依赖塞进仓库。
+> v0.1 还没有做安装包（`.exe`）。
 
 ---
 
