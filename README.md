@@ -215,6 +215,7 @@ v0.13 的「切歌后自动播放」在新配置中默认不勾选；升级会�
 
 ```
 AlbumDeck/
+├─ .github/FUNDING.yml   GitHub Sponsor 按钮入口
 ├─ src/
 │  ├─ main.js            主进程：窗口 / 托盘 / 全局快捷键 / 播放队列 / 全部 IPC
 │  ├─ renderer.js        主界面逻辑：侧边栏、曲目表、收藏夹、播放列表、拖拽
@@ -327,6 +328,7 @@ git push origin v0.13
 - 点歌定位：等待媒体可定位并确认实际进度；点歌完成后校验 10 秒内的异常跳转，纠正 B 站历史记录覆盖所选曲目的情况
 - 连续点歌：以最后一次选择为准，旧导航和定位请求不会覆盖新选择；慢加载和页面切换中的旧轮询不改动目标队列
 - 播放回归测试扩充至 28 项；真实浏览器自检覆盖启动、重连、控件延迟加载、曲尾暂停、历史进度纠正与连续跨专辑点歌
+- 完善「支持作者」：README 展示微信 / 支付宝收款二维码，仓库 Sponsor 按钮跳转到赞助区
 
 验证：`npm run test:all`、`npm run test:cdp`、`npm run test:pause-cdp`、`npm run test:folder`。完整发布说明见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
@@ -358,9 +360,13 @@ git push origin v0.13
 
 ## 支持作者
 
-如果唱片台让你听专辑更方便，欢迎自愿赞助，支持后续开发和维护。谢谢每一份支持，也欢迎通过 [GitHub Issues](https://github.com/kenaziuuu/AlbumDeck/issues) 反馈问题和建议。
+如果唱片台让你听专辑更方便，欢迎请作者喝杯咖啡，支持后续开发和维护。软件免费开源，赞助完全自愿，感谢你的支持。
 
-<!-- 收到作者提供的收款链接后，在这里添加赞助按钮或收款码。 -->
+| 微信 | 支付宝 |
+|:---:|:---:|
+| <img src="assets/sponsor/wechat.png" alt="微信收款二维码" width="240" height="240"> | <img src="assets/sponsor/alipay.png" alt="支付宝收款二维码" width="240" height="240"> |
+
+也欢迎通过 [GitHub Issues](https://github.com/kenaziuuu/AlbumDeck/issues) 反馈问题和建议。
 
 ---
 
