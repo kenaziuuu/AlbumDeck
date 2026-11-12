@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>唱片台 · AlbumDeck</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <!-- 标题栏 -->
+  <header class="titlebar">
+    <div class="brand">
+      <img src="../assets/icon.png" alt="">
+      <span>唱片台</span><em>AlbumDeck</em>
+    </div>
+    <div class="tb-status" id="tbStatus"></div>
+    <div class="tb-actions">
+      <button class="tb-btn mini" id="btnMiniMenu" title="悬浮窗样式 / 显示隐藏">▭</button>
+      <button class="tb-btn" data-win="min" title="最小化">−</button>
+      <button class="tb-btn" data-win="max" title="最大化">□</button>
+      <button class="tb-btn close" data-win="close" title="隐藏到托盘">×</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <!-- 左侧 -->
+    <aside class="sidebar">
+      <section class="conn-card" id="connCard">
+        <div class="conn-row">
+          <span class="dot" id="connDot"></span>
+          <div class="conn-text">
+            <strong id="connTitle">未连接浏览器</strong>
+            <small id="connSub">点击启动一个专用的浏览器窗口</small>
+          </div>
+        </div>
+        <div class="conn-btns">
+          <button class="btn primary" id="btnLaunch">启动专用浏览器</button>
+          <button class="btn ghost" id="btnReconnect" title="连接已在运行的调试浏览器">重连</button>
+        </div>
+        <p class="conn-note">首次启动需要在新窗口登录一次 B 站（用于高音质），之后会自动记住。</p>
+      </section>
+
+      <div class="side-head">
+        <div class="side-tabs">
+          <button class="side-tab active" data-view="library">资料库</button>
+          <button class="side-tab" data-view="folder">收藏夹</button>
+        </div>
+        <div class="side-head-right">
+          <button class="side-sort" id="btnSortAlbums" hidden title="调整专辑顺序">⇅</button>
+          <span class="pill" id="albumCount">0</span>
+        </div>
+      </div>
+      <div class="search-wrap">
+        <svg viewBox="0 0 24 24" class="ico"><circle cx="11" cy="11" r="7"/><path d="M16 16l5 5"/></svg>
+        <input id="albumSearch" placeholder="搜索专辑 / 歌手" autocomplete="off">
+      </div>
+      <div class="album-list-wrap" id="albumListWrap">
+        <div class="album-list" id="albumList"></div>
+      </div>
+      <div class="side-foot">
+        <button class="btn primary block" id="btnImport">＋ 导入专辑 / 合集</button>
+        <div class="row2">
+          <button class="btn ghost" id="btnSettings">设置</button>
+          <button class="btn ghost" id="btnExport">导出</button>
+          <button class="btn ghost" id="btnMini">悬浮窗</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 右侧 -->
+    <main class="content">
+      <section class="now-card">
+        <div class="now-glow"></div>
+        <div class="cover" id="cover"><div class="cover-inner">♫</div></div>
+        <div class="now-main">
+          <div class="now-label">正在播放 · NOW PLAYING</div>
+          <h1 id="nowTrack">—</h1>
+          <div class="now-album" id="nowAlbum">—</div>
+          <div class="progress">
+            <div class="bar"><div class="bar-fill" id="barFill"></div><div class="bar-handle" id="barHandle"></div></div>
+            <div class="times"><span id="timeNow">00:00</span><span id="timeTotal">00:00</span></div>
+          </div>
+          <div class="controls">
+            <button class="ctrl" id="btnPrevAlbum" title="上一张专辑"><svg viewBox="0 0 24 24"><path d="M6 5v14M19 6l-9 6 9 6z"/></svg></button>
+            <button class="ctrl" id="btnPrev" title="上一首"><svg viewBox="0 0 24 24"><path d="M7 5v14M18 6L9 12l9 6z"/></svg></button>
+            <button class="ctrl play" id="btnPlay"><svg viewBox="0 0 24 24" id="playIcon"><path d="M8 5l11 7-11 7z"/></svg></button>
+            <button class="ctrl" id="btnNext" title="下一首"><svg viewBox="0 0 24 24"><path d="M17 5v14M6 6l9 6-9 6z"/></svg></button>
+            <button class="ctrl" id="btnNextAlbum" title="下一张专辑"><svg viewBox="0 0 24 24"><path d="M18 5v14M5 6l9 6-9 6z"/></svg></button>
+            <span class="ctrl-sep"></span>
+            <button class="chip heart-chip" id="btnLikeNow" title="一键红心：加入歌曲收藏夹「喜欢」">♡ 红心</button>
+            <button class="chip" id="btnFavNow" title="一键收藏：加入指定收藏夹">☆ 收藏</button>
+            <button class="chip" id="btnOpenBili">在 B 站打开</button>
+            <button class="chip" id="btnEditAlbum">编辑曲目</button>
+          </div>
+        </div>
+      </section>
+
+      <div class="tracks-head">
+        <div class="list-head-left">
+          <strong id="listTitle">曲目列表</strong><span id="trackCount"></span>
+          <button class="btn ghost small" id="btnAddTrack">＋ 加入单曲</button>
+          <button class="btn ghost small" id="btnSort" hidden title="调整顺序：拖拽条目改变播放顺序">⇅ 调整顺序</button>
+        </div>
+        <div class="head-tools" id="headTools">
+          <button class="mode-btn" id="btnPlayMode" title="点一下切换播放顺序"></button>
+          <button class="btn ghost small" id="btnQueue" title="打开播放列表">☰ 播放列表</button>
+        </div>
+        <div class="folder-tools" id="folderTools" hidden>
+          <button class="btn ghost small" id="btnPickItems">＋ 加入单曲</button>
+          <button class="btn ghost small" id="btnFolderRename">重命名</button>
+          <button class="btn ghost small" id="btnFolderClear">清空</button>
+          <button class="btn ghost small danger" id="btnFolderDelete">删除</button>
+        </div>
+      </div>
+      <div class="track-list" id="trackList"></div>
+      <div class="hint-bar" id="hotkeyHint"></div>
+
+      <!-- 播放列表（按专辑分组，点专辑展开） -->
+      <aside class="queue-panel" id="queuePanel">
+        <div class="qp-head">
+          <div><strong>播放列表</strong><span class="muted" id="qpCount"></span></div>
+          <button class="x" id="qpClose" title="收起">×</button>
+        </div>
+        <div class="qp-mode" id="qpMode"></div>
+        <div class="qp-list" id="qpList"></div>
+      </aside>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<!-- 导入弹窗 -->
+<div class="mask" id="importModal">
+  <div class="modal wide">
+    <div class="modal-head"><h2>导入专辑</h2><button class="x" data-close="importModal">×</button></div>
+    <div class="tabs">
+      <button class="tab active" data-tab="paste">粘贴时间戳</button>
+      <button class="tab" data-tab="link">B 站链接 / 合集</button>
+      <button class="tab" data-tab="search">关键词搜索</button>
+    </div>
+
+    <div class="tab-pane active" id="pane-paste">
+      <div class="form-grid">
+        <label>专辑名称 <input id="pTitle" placeholder="留空则自动从视频标题生成"></label>
+        <label>视频链接 / BV 号 <input id="pBvid" placeholder="https://www.bilibili.com/video/BV... 或 BV1Tw411G74d"></label>
+      </div>
+      <label class="full-label">把评论区的时间戳整段粘进来 <span class="muted">支持「歌名 01:25」「01:25 歌名」「1:05:30」等格式</span></label>
+      <textarea id="pText" rows="9" placeholder="On The Road(Demo1)00:00&#10;我要的幸福01:25&#10;坏天气05:01&#10;…"></textarea>
+      <div class="paste-actions">
+        <button class="btn ghost small" id="btnFillSample">填入示例（孙燕姿《我要的幸福》）</button>
+        <button class="btn ghost small" id="btnLoadChapters" title="读取视频播放器右下角「章」里的章节，自动填进上面的框">⧉ 从视频章节读取</button>
+        <span id="parseInfo" class="muted"></span>
+      </div>
+      <div class="preview" id="pPreview"></div>
+      <div class="modal-foot"><button class="btn primary" id="btnAddPaste">添加到曲库</button></div>
+    </div>
+
+    <div class="tab-pane" id="pane-link">
+      <div class="inline-form">
+        <input id="linkInput" placeholder="粘贴视频 / 合集 / 系列 / UP 主空间链接，或多个 BV 号">
+        <button class="btn primary" id="btnResolve">解析</button>
+      </div>
+      <div class="quick-links">
+        <span>快捷：</span>
+        <button class="link-chip" data-link="https://www.bilibili.com/video/BV1Tw411G74d/">孙燕姿《我要的幸福》</button>
+        <button class="link-chip" data-link="https://space.bilibili.com/3493093722556825/lists/947238">HiRes无损专辑（1）· 624 张</button>
+        <button class="link-chip" data-link="https://space.bilibili.com/3493093722556825/">B站UP主HiRes无损体验馆</button>
+        <button class="link-chip" data-link="https://space.bilibili.com/3493093607213343/">B站UP主JLRS-LeoFM</button>
+      </div>
+      <div id="resolveInfo" class="resolve-info"></div>
+      <div id="seasonChips" class="season-chips"></div>
+      <div class="candidate-wrap" id="candidateWrap" hidden>
+        <div class="candidate-head">
+          <input id="candFilter" placeholder="过滤视频标题…">
+          <div class="cand-actions"><button class="btn ghost small" id="btnSelAll">全选</button><button class="btn ghost small" id="btnSelNone">清空</button><span id="candCount"></span></div>
+        </div>
+        <div class="candidate-list" id="candidateList"></div>
+      </div>
+      <div class="import-progress" id="importProgress" hidden></div>
+      <div class="modal-foot">
+        <span class="muted" id="buildHint">选择视频后，会自动读取置顶评论里的曲目时间戳</span>
+        <button class="btn ghost" id="btnBuildFav" disabled title="先选收藏夹，再把勾选的视频导入并放进这个收藏夹">＋ 导入到收藏夹</button>
+        <button class="btn primary" id="btnBuild" disabled>抓取时间戳并导入</button>
+      </div>
+    </div>
+
+    <div class="tab-pane" id="pane-search">
+      <div class="inline-form">
+        <input id="searchInput" placeholder="例如：孙燕姿 专辑 / HiRes 无损专辑">
+        <button class="btn primary" id="btnSearch">搜索</button>
+      </div>
+      <div class="muted small-note">搜索结果会显示在下方「B 站链接」标签页的候选列表中，勾选后即可批量导入。</div>
+      <div id="searchInfo"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 设置弹窗 -->
+<div class="mask" id="settingsModal">
+  <div class="modal">
+    <div class="modal-head"><h2>设置</h2><button class="x" data-close="settingsModal">×</button></div>
+    <div class="settings-body">
+      <h3>浏览器连接</h3>
+      <div class="form-grid">
+        <label>调试端口 <input id="sPort" type="number" min="1024" max="65535"></label>
+        <label>浏览器路径 <input id="sBrowser" placeholder="留空自动检测 Edge / Chrome"></label>
+      </div>
+      <button class="btn ghost small" id="btnPickBrowser">浏览选择浏览器 exe…</button>
+      <p class="muted small-note">专用浏览器使用独立配置目录，首次打开需登录一次 B 站。修改端口后请重新启动浏览器。</p>
+
+      <h3>播放</h3>
+      <div class="toggles">
+        <label><input type="checkbox" id="sAutoPlay"> 切歌后自动播放</label>
+        <label><input type="checkbox" id="sAlbumClickPlay"> 点击资料库专辑时直接播放（关掉则先只显示曲目）</label>
+        <label><input type="checkbox" id="sSkipHidden"> 隐藏的曲目自动跳过</label>
+      </div>
+
+      <h3>悬浮窗</h3>
+      <div class="toggles">
+        <label><input type="checkbox" id="sMini"> 显示迷你悬浮窗</label>
+        <label><input type="checkbox" id="sMiniEdgeHide"> 贴边自动隐藏</label>
+      </div>
+      <div class="peek-row">
+        <label for="sMiniPeek">隐藏后露出的边缘（越大越明显）</label>
+        <input type="range" id="sMiniPeek" min="1" max="16" step="1" value="3">
+        <span class="muted" id="sMiniPeekVal">3 px</span>
+      </div>
+      <div class="type-choices mini-styles">
+        <button class="type-choice" data-mini-style="full">完整样式<small>进度条 + 红心 + 全部控制</small></button>
+        <button class="type-choice" data-mini-style="compact">简洁长条<small>只留歌名与控制，更省地方</small></button>
+        <button class="type-choice" data-mini-style="vertical">MP3样式<small>专辑/歌名竖排，按钮上下分布</small></button>
+      </div>
+      <p class="muted small-note">贴边隐藏：把悬浮窗拖到屏幕左 / 右 / 上边缘，它会自动收起；鼠标移到屏幕边缘再滑出。也可以点标题栏 ▭ →「收起到屏幕左侧 / 右侧」，或悬浮窗上的 ⇥ 手动收起。</p>
+
+      <h3>全局快捷键 <span class="muted">（任何软件里都能用）</span></h3>
+      <div class="hotkey-grid" id="hotkeyGrid"></div>
+      <div id="hotkeyErrors" class="warn"></div>
+      <button class="btn ghost small" id="btnResetHk">恢复默认快捷键</button>
+
+      <h3>数据</h3>
+      <div class="row2 wide-row">
+        <button class="btn ghost small" id="btnOpenData">打开数据目录</button>
+        <button class="btn ghost small" id="btnImportFile">导入曲库 JSON</button>
+        <button class="btn ghost small" id="btnResetSeed">恢复示例曲库</button>
+        <button class="btn ghost small danger" id="btnQuit">退出应用</button>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn primary" id="btnSaveSettings">保存设置</button></div>
+  </div>
+</div>
+
+<!-- 编辑弹窗 -->
+<div class="mask" id="editModal">
+  <div class="modal">
+    <div class="modal-head"><h2>编辑专辑</h2><button class="x" data-close="editModal">×</button></div>
+    <div class="settings-body">
+      <label class="full-label">专辑名称<input id="eTitle"></label>
+      <label class="full-label">视频 BV 号<input id="eBvid"></label>
+      <label class="full-label">曲目时间戳（每行一首，改完点保存）<span class="muted">格式：歌名 01:25</span></label>
+      <textarea id="eText" rows="10"></textarea>
+      <div class="row2 wide-row">
+        <button class="btn ghost small" id="btnEditChapters" title="读取视频自带章节并填入上面的框">⧉ 从视频章节读取</button>
+        <button class="btn ghost small danger" id="btnDeleteAlbum">删除这张专辑</button>
+      </div>
+    </div>
+    <div class="modal-foot"><button class="btn primary" id="btnSaveAlbum">保存</button></div>
+  </div>
+</div>
+
+<!-- 收藏夹：新建 / 重命名 -->
+<div class="mask" id="folderModal">
+  <div class="modal narrow">
+    <div class="modal-head"><h2 id="folderModalTitle">新建收藏夹</h2><button class="x" data-close="folderModal">×</button></div>
+    <div class="settings-body">
+      <label class="full-label">收藏夹名称<input id="fName" placeholder="例如：睡前循环" maxlength="24"></label>
+      <div id="fTypeWrap">
+        <div class="type-label">这个收藏夹用来装</div>
+        <div class="type-choices">
+          <button class="type-choice active" data-type="song">♥ 歌曲<small>红心的歌默认进「喜欢」</small></button>
+          <button class="type-choice" data-type="album">▤ 专辑<small>收藏整张专辑</small></button>
+        </div>
+      </div>
+      <div class="muted small-note" id="fHint">歌曲收藏夹里放单曲；专辑收藏夹里放整张专辑。</div>
+    </div>
+    <div class="modal-foot"><button class="btn primary" id="btnSaveFolder">创建</button></div>
+  </div>
+</div>
+
+<!-- 往专辑里加入单曲 -->
+<div class="mask" id="trackModal">
+  <div class="modal narrow">
+    <div class="modal-head"><h2>加入单曲</h2><button class="x" data-close="trackModal">×</button></div>
+    <div class="settings-body">
+      <div class="muted small-note" id="tAlbumName"></div>
+      <label class="full-label">歌曲名称<input id="tName" placeholder="例如：我要的幸福"></label>
+      <label class="full-label">起始时间<input id="tStart" placeholder="05:01 或 1:05:30"></label>
+      <div class="muted small-note">时间填这首在视频里的开始位置，加入后会自动按时间排序并重算每首时长。</div>
+    </div>
+    <div class="modal-foot"><button class="btn primary" id="btnSaveTrack">加入</button></div>
+  </div>
+</div>
+
+<!-- 从曲库挑选单曲 / 专辑加入收藏夹 -->
+<div class="mask" id="pickModal">
+  <div class="modal wide">
+    <div class="modal-head"><h2 id="pickTitle">从曲库加入</h2><button class="x" data-close="pickModal">×</button></div>
+    <div class="pick-body">
+      <input id="pickSearch" placeholder="搜索歌名 / 专辑名…" autocomplete="off">
+      <div class="pick-actions"><button class="btn ghost small" id="btnPickAll">全选当前结果</button><span class="muted" id="pickCount"></span></div>
+      <div class="pick-list" id="pickList"></div>
+    </div>
+    <div class="modal-foot"><span class="muted" id="pickHint"></span><button class="btn primary" id="btnSavePick">加入收藏夹</button></div>
+  </div>
+</div>
+
+<!-- 收藏目标选择浮层 -->
+<div class="pop-menu" id="popMenu"></div>
+
+<script src="renderer.js"></script>
+</body>
+</html>

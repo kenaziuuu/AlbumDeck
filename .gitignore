@@ -1,0 +1,20 @@
+# 依赖
+node_modules/
+
+# 自检产物
+tools/*-test.json
+tools/*.log
+tools/shot.png
+tools/*.tmp
+
+# 打包产物
+dist/
+out/
+*.zip
+
+# 系统 / 编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.local

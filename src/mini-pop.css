@@ -1,0 +1,73 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  background: transparent; color: #e9edf6; user-select: none;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px; -webkit-app-region: no-drag;
+}
+.pp {
+  height: 100%; display: flex; flex-direction: column;
+  border: 1px solid #2b3344; border-radius: 12px;
+  background: linear-gradient(150deg, #151926, #10131c 70%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .5);
+  overflow: hidden;
+}
+.pp-head {
+  display: flex; align-items: center; gap: 6px; flex: 0 0 auto;
+  padding: 8px 8px 8px 11px; border-bottom: 1px solid #232b3b;
+}
+.pp-title { font-size: 11.5px; font-weight: 600; color: #dfe5f1; }
+.pp-sub { flex: 1; font-size: 10px; color: #5c677c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pp-x {
+  -webkit-app-region: no-drag; width: 19px; height: 19px; border: 0; background: transparent;
+  color: #6f7b92; font-size: 14px; line-height: 1; padding: 0; border-radius: 5px; cursor: pointer;
+}
+.pp-x:hover { background: #242c3d; color: #fff; }
+.pp-body { flex: 1; min-height: 0; max-height: 300px; overflow-y: auto; padding: 5px 5px 7px; }
+
+/* 量高度：让内容自然撑开，否则 scrollHeight 会被窗口高度撑大、弹窗留一大片空白 */
+html.measuring, html.measuring body { height: auto !important; }
+html.measuring .pp { height: auto !important; width: max-content !important; }
+html.measuring .pp-body { flex: 0 0 auto !important; }
+.pp-body::-webkit-scrollbar { width: 6px; }
+.pp-body::-webkit-scrollbar-thumb { background: #2f3849; border-radius: 3px; }
+.pp-body::-webkit-scrollbar-track { background: transparent; }
+
+/* 列表项 */
+.pi {
+  -webkit-app-region: no-drag; display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 7px 8px; border: 0; background: transparent; color: #cbd4e4;
+  border-radius: 7px; font-size: 11.5px; font-family: inherit; text-align: left;
+  line-height: 1.2; cursor: pointer;
+}
+.pi:hover { background: #1e2534; color: #fff; }
+.pi.on { color: #fb7299; }
+.pi.new { color: #fb7299; margin-top: 3px; border-top: 1px solid #232b3b; border-radius: 0 0 7px 7px; padding-top: 9px; }
+.pi .ico { width: 13px; flex: 0 0 13px; text-align: center; font-size: 10.5px; color: #8b95aa; }
+.pi.on .ico { color: #fb7299; }
+.pi .name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pi .num { font-size: 10px; color: #5c677c; font-variant-numeric: tabular-nums; }
+.pp-empty { padding: 18px 10px; color: #5c677c; font-size: 11px; text-align: center; }
+
+/* 播放列表分组 */
+.pg { margin-bottom: 2px; }
+.pg-album { display: flex; align-items: center; gap: 6px; padding: 6px 7px; border-radius: 7px; font-size: 11px; cursor: pointer; }
+.pg-album:hover { background: #1e2534; }
+.pg-arrow { width: 9px; flex: 0 0 9px; font-size: 8px; color: #5c677c; transition: transform .15s; }
+.pg.open .pg-arrow { transform: rotate(90deg); }
+.pg-album .pg-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-album .pg-num { font-size: 9.5px; color: #5c677c; }
+.pg.current .pg-album { background: rgba(251, 114, 153, .08); }
+.pg.current .pg-album:hover { background: rgba(251, 114, 153, .14); }
+.pg.current .pg-name { color: #ff9ab8; }
+.pg.current .pg-arrow { color: #fb7299; }
+.pg-tracks { display: none; padding: 1px 0 4px 11px; }
+.pg.open .pg-tracks { display: block; }
+.pt { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border-radius: 6px; font-size: 11px; cursor: pointer; }
+.pt:hover { background: #1e2534; }
+.pt.active { background: rgba(251, 114, 153, .12); }
+.pt .no { width: 16px; flex: 0 0 16px; font-size: 9.5px; color: #5c677c; font-variant-numeric: tabular-nums; }
+.pt .tn { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt.active .tn { color: #ff9ab8; }
+.pt .tm { font-size: 9.5px; color: #5c677c; font-variant-numeric: tabular-nums; }
+.pt.hidden-track { opacity: .4; text-decoration: line-through; text-decoration-color: rgba(200, 210, 225, .45); }

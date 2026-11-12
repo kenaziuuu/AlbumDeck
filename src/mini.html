@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self'">
+<title>唱片台 · 悬浮窗</title>
+<link rel="stylesheet" href="mini.css">
+</head>
+<body class="style-full">
+<!-- 完整样式 -->
+<div class="mini mini-full" id="miniFull">
+  <div class="m-top">
+    <div class="m-dot" id="mDot"></div>
+    <div class="m-name" id="mName">—</div>
+    <button class="m-btn" id="mCollapse" title="收起到屏幕侧边">⇥</button>
+    <button class="m-btn" id="mMain" title="打开主窗口">⤢</button>
+    <button class="m-btn" id="mClose" title="隐藏悬浮窗">×</button>
+  </div>
+  <div class="m-album" id="mAlbum">—</div>
+  <div class="m-bar"><div class="m-fill" id="mFill"></div></div>
+  <div class="m-times"><span id="mNow">00:00</span><span id="mTotal">00:00</span></div>
+  <div class="m-controls">
+    <button class="m-ctrl" id="mPrevAlbum" title="上一张专辑">⏮</button>
+    <button class="m-ctrl" id="mPrev" title="上一首">◀◀</button>
+    <button class="m-ctrl play" id="mPlay">▶</button>
+    <button class="m-ctrl" id="mNext" title="下一首">▶▶</button>
+    <button class="m-ctrl" id="mNextAlbum" title="下一张专辑">⏭</button>
+    <button class="m-ctrl heart" id="mHeart" title="一键红心：加入「喜欢」">♡</button>
+    <button class="m-ctrl fav" id="mFav" title="收藏到收藏夹">☆</button>
+    <button class="m-ctrl" id="mMode" title="播放顺序"></button>
+    <button class="m-ctrl" id="mQueue" title="播放列表">☰</button>
+  </div>
+</div>
+
+<!-- MP3 紧凑样式 -->
+<div class="mini mini-compact" id="miniCompact">
+  <div class="mc-cover" id="mcCover"><span>♫</span></div>
+  <div class="mc-meta">
+    <div class="mc-name" id="mcName">—</div>
+    <div class="mc-album" id="mcAlbum">—</div>
+  </div>
+  <div class="mc-ctrl">
+    <button class="mc-btn" id="mcPrevAlbum" title="上一张专辑">⏮</button>
+    <button class="mc-btn" id="mcPrev" title="上一首">◀</button>
+    <button class="mc-btn play" id="mcPlay" title="播放 / 暂停">▶</button>
+    <button class="mc-btn" id="mcNext" title="下一首">▶</button>
+    <button class="mc-btn" id="mcNextAlbum" title="下一张专辑">⏭</button>
+  </div>
+  <div class="mc-bar"><div class="mc-fill" id="mcFill"></div></div>
+</div>
+
+<!-- 竖直样式 -->
+<div class="mini mini-vertical" id="miniVertical">
+  <div class="mv-top">
+    <div class="m-dot" id="mvDot"></div>
+    <span class="mv-sp"></span>
+    <button class="m-btn" id="mvCollapse" title="收起到屏幕侧边">⇥</button>
+    <button class="m-btn" id="mvMain" title="打开主窗口">⤢</button>
+    <button class="m-btn" id="mvClose" title="隐藏悬浮窗">×</button>
+  </div>
+  <div class="mv-album" id="mvAlbum">—</div>
+  <div class="mv-name" id="mvName">—</div>
+  <div class="mv-ctrl">
+    <button class="mv-btn" id="mvPrev" title="上一首">◀◀</button>
+    <button class="mv-btn play" id="mvPlay" title="播放 / 暂停">▶</button>
+    <button class="mv-btn" id="mvNext" title="下一首">▶▶</button>
+  </div>
+  <div class="mv-albums">
+    <button class="mv-btn sq" id="mvPrevAlbum" title="上一张专辑">⏮</button>
+    <button class="mv-btn sq" id="mvNextAlbum" title="下一张专辑">⏭</button>
+  </div>
+  <div class="mv-tools">
+    <button class="mv-tool" id="mvHeart" title="红心：加入「喜欢」">♡</button>
+    <button class="mv-tool" id="mvFav" title="收藏到收藏夹">☆</button>
+    <button class="mv-tool" id="mvMode" title="播放顺序"></button>
+    <button class="mv-tool" id="mvQueue" title="播放列表">☰</button>
+  </div>
+  <div class="mv-bar"><div class="mv-fill" id="mvFill"></div></div>
+</div>
+<script src="mini.js"></script>
+</body>
+</html>

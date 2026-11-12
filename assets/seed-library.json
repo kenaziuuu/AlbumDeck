@@ -1,0 +1,93 @@
+{
+  "name": "HiRes无损专辑（1） · 孙燕姿系列",
+  "albums": [
+    {
+      "id": "a_mwc80db1_0",
+      "title": "孙燕姿 2000 《我要的幸福》",
+      "bvid": "BV1Tw411G74d",
+      "aid": 325370829,
+      "duration": 2630,
+      "pic": "http://i0.hdslb.com/bfs/archive/b5b8b642df97fec6f59c706a3200a6ad31452564.jpg",
+      "tracks": [
+        {
+          "name": "On The Road(Demo1)",
+          "start": 0,
+          "end": 85
+        },
+        {
+          "name": "我要的幸福",
+          "start": 85,
+          "end": 301
+        },
+        {
+          "name": "坏天气",
+          "start": 301,
+          "end": 572
+        },
+        {
+          "name": "零缺点",
+          "start": 572,
+          "end": 792
+        },
+        {
+          "name": "开始懂了",
+          "start": 792,
+          "end": 1064
+        },
+        {
+          "name": "中间地带",
+          "start": 1064,
+          "end": 1335
+        },
+        {
+          "name": "相信",
+          "start": 1335,
+          "end": 1606
+        },
+        {
+          "name": "累赘",
+          "start": 1606,
+          "end": 1801
+        },
+        {
+          "name": "难得一见",
+          "start": 1801,
+          "end": 2054
+        },
+        {
+          "name": "害怕",
+          "start": 2054,
+          "end": 2297
+        },
+        {
+          "name": "星期一天气晴我离开你",
+          "start": 2297,
+          "end": 2557
+        },
+        {
+          "name": "On The Road(Demo2)",
+          "start": 2557,
+          "end": 2630
+        }
+      ],
+      "tracksOk": true
+    },
+    {
+      "id": "a_mwd7wyf8_0",
+      "title": "迈克尔·杰克逊 《We Are the World》",
+      "bvid": "BV1NY4y1x72L",
+      "aid": 639661030,
+      "duration": 433,
+      "pic": "http://i0.hdslb.com/bfs/archive/21bf58c70360d038940a9e87df29021e897fa686.jpg",
+      "tracks": [
+        {
+          "name": "迈克尔·杰克逊《We Are the World》史上最强群星合唱！",
+          "start": 0,
+          "end": 433
+        }
+      ],
+      "tracksSource": "single",
+      "tracksOk": true
+    }
+  ]
+}

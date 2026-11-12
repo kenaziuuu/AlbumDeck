@@ -1,0 +1,122 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+body {
+  background: transparent; color: #e9edf6; user-select: none;
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  font-size: 12px; -webkit-app-region: drag;
+}
+.mini {
+  height: 100%; border: 1px solid #2b3344; border-radius: 12px;
+  background: linear-gradient(150deg, #151926, #10131c 70%);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+}
+body.style-full .mini-compact { display: none; }
+body.style-compact .mini-full { display: none; }
+body.style-full .mini-vertical,
+body.style-compact .mini-vertical { display: none; }
+body.style-vertical .mini-full,
+body.style-vertical .mini-compact { display: none; }
+body.style-vertical .mini-vertical { display: flex; }
+.mini-vertical { display: none; }
+
+/* ── 完整样式 ── */
+.mini-full { padding: 10px 12px 9px; display: flex; flex-direction: column; }
+.m-top { display: flex; align-items: center; gap: 7px; }
+.m-dot { width: 7px; height: 7px; border-radius: 50%; background: #5a647a; flex: 0 0 auto; }
+.m-dot.on { background: #5ee0c8; box-shadow: 0 0 8px rgba(94,224,200,.7); }
+.m-name { flex: 1; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-btn { -webkit-app-region: no-drag; width: 20px; height: 20px; border: 0; background: transparent; color: #6f7b92; font-size: 14px; line-height: 1; padding: 0; border-radius: 5px; }
+.m-btn:hover { background: #242c3d; color: #fff; }
+.m-album { color: #7f8ba2; font-size: 10.5px; margin: 3px 0 7px 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.m-bar { height: 4px; background: #2a3141; border-radius: 4px; overflow: hidden; }
+.m-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #a78bfa, #fb7299); border-radius: 4px; transition: width .25s linear; }
+.m-times { display: flex; justify-content: space-between; color: #5c677c; font-size: 10px; margin-top: 3px; font-variant-numeric: tabular-nums; }
+.m-controls { display: flex; align-items: center; justify-content: flex-start; gap: 4px; margin-top: 6px; }
+.m-ctrl {
+  -webkit-app-region: no-drag; min-width: 29px; height: 26px; padding: 0 4px; border: 1px solid #2b3344;
+  background: #1a2030; color: #cbd4e4; border-radius: 7px; font-size: 10px; line-height: 1;
+  display: grid; place-items: center; flex: 0 0 auto;
+}
+.m-ctrl:hover { background: #2a3346; border-color: #46526c; }
+.m-ctrl.play { background: linear-gradient(135deg, #fb7299, #e4558e); border-color: transparent; color: #fff; font-size: 12px; min-width: 36px; }
+.m-ctrl.heart { font-size: 13px; color: #8b95aa; }
+.m-ctrl.heart.on { color: #fb7299; border-color: rgba(251,114,153,.5); background: rgba(251,114,153,.12); }
+.m-ctrl.fav { font-size: 13px; color: #8b95aa; }
+.m-ctrl.fav.on { color: #fb7299; border-color: rgba(251,114,153,.5); background: rgba(251,114,153,.12); }
+.m-ctrl svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+#mQueue { font-size: 12px; }
+.m-sp { flex: 1; }
+.m-status { color: #5c677c; font-size: 10px; white-space: nowrap; }
+
+/* ── MP3 紧凑样式 ── */
+.mini-compact {
+  position: relative; display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px 11px;
+}
+.mc-cover {
+  width: 44px; height: 44px; flex: 0 0 44px; border-radius: 9px; overflow: hidden;
+  background: linear-gradient(145deg, #242c3d, #151a26); border: 1px solid #30384a;
+  display: grid; place-items: center; color: #4a5670; font-size: 18px;
+}
+.mc-cover img { width: 100%; height: 100%; object-fit: cover; }
+.mc-meta { flex: 1; min-width: 0; }
+.mc-name { font-size: 12.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-album { color: #7f8ba2; font-size: 10px; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-ctrl { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.mc-btn {
+  -webkit-app-region: no-drag; width: 27px; height: 27px; padding: 0; border: 1px solid #2b3344;
+  background: #1a2030; color: #cbd4e4; border-radius: 50%; font-size: 9px; line-height: 1;
+  display: grid; place-items: center; transition: .12s;
+}
+.mc-btn:hover { background: #2a3346; border-color: #46526c; color: #fff; }
+.mc-btn.play {
+  width: 31px; height: 31px; background: linear-gradient(135deg, #fb7299, #e4558e);
+  border-color: transparent; color: #fff; font-size: 11px;
+  box-shadow: 0 3px 10px rgba(251,114,153,.28);
+}
+.mc-bar { position: absolute; left: 12px; right: 12px; bottom: 5px; height: 2px; background: #2a3141; border-radius: 2px; overflow: hidden; }
+.mc-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #a78bfa, #fb7299); border-radius: 2px; transition: width .25s linear; }
+
+/* ── MP3样式（竖长条 120×220） ── */
+.mini-vertical {
+  flex-direction: column; align-items: center;
+  padding: 7px 8px 10px; position: relative;
+}
+.mv-top { display: flex; align-items: center; gap: 1px; width: 100%; height: 16px; }
+.mini-vertical .m-btn { width: 15px; height: 15px; font-size: 10px; border-radius: 4px; }
+.mini-vertical .m-dot { width: 6px; height: 6px; }
+.mv-sp { flex: 1; }
+.mv-album {
+  color: #8b95aa; font-size: 9.5px; margin-top: 3px; max-width: 100%; line-height: 13px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center;
+}
+.mv-name {
+  font-size: 12.5px; font-weight: 700; line-height: 17px; margin-top: 4px; max-width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: center; color: #fff;
+}
+.mv-ctrl { display: flex; align-items: center; gap: 8px; margin-top: 13px; }
+.mv-btn {
+  -webkit-app-region: no-drag; padding: 0; border: 1px solid #2b3344; background: #1a2030;
+  color: #cbd4e4; border-radius: 50%; display: grid; place-items: center;
+  font-size: 8px; line-height: 1; width: 25px; height: 25px; transition: .12s;
+}
+.mv-btn:hover { background: #2a3346; border-color: #46526c; color: #fff; }
+.mv-btn.play {
+  width: 36px; height: 36px; border-radius: 50%; border-color: transparent;
+  background: linear-gradient(135deg, #fb7299, #e4558e); color: #fff; font-size: 11px;
+  box-shadow: 0 3px 12px rgba(251,114,153,.35);
+}
+.mv-albums { display: flex; gap: 10px; margin-top: 10px; justify-content: center; }
+.mv-btn.sq { width: 28px; height: 28px; border-radius: 8px; font-size: 9px; }
+.mv-tools { display: flex; gap: 4px; margin-top: 10px; width: 100%; }
+.mv-tool {
+  -webkit-app-region: no-drag; flex: 1; height: 25px; padding: 0;
+  border: 1px solid #2b3344; background: #1a2030; color: #cbd4e4;
+  border-radius: 7px; font-size: 11px; line-height: 1;
+  display: grid; place-items: center; transition: .12s;
+}
+.mv-tool:hover { background: #2a3346; border-color: #46526c; color: #fff; }
+.mv-tool.on { color: #fb7299; border-color: rgba(251,114,153,.5); background: rgba(251,114,153,.12); }
+.mv-tool svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.mv-bar { position: absolute; left: 8px; right: 8px; bottom: 5px; height: 2px; background: #2a3141; border-radius: 2px; overflow: hidden; }
+.mv-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #a78bfa, #fb7299); border-radius: 2px; transition: width .25s linear; }
