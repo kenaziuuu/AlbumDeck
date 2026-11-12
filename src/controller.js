@@ -28,6 +28,9 @@ const STATE_EXPR = `(() => {
     d: v ? v.duration : 0,
     paused: v ? v.paused : true,
     ended: v ? !!v.ended : false,
+    playbackRate: v ? v.playbackRate : 1,
+    mediaReady: v ? v.readyState : 0,
+    seeking: v ? v.seeking : false,
     muted: v ? v.muted : false,
     volume: v ? v.volume : 1,
     bvid: bv,
@@ -37,10 +40,27 @@ const STATE_EXPR = `(() => {
   };
 })()`;
 
+// 使用播放器自己的「播完暂停」，让视频完整结束后由唱片台接歌。
+// 不直接改 localStorage：走页面现有控件的事件，让播放器立即采用并保存该设置。
+const PAUSE_AT_END_EXPR = `(() => {
+  const group = document.querySelector('.bpx-player-ctrl-setting-handoff-content');
+  const input = group && group.querySelector('input[type="radio"][value="2"]');
+  if (!input) return { ok: false, reason: 'not-ready' };
+  if (!input.checked) input.click();
+  return { ok: !!input.checked };
+})()`;
+
+function stateExpr(pauseAtEnd) {
+  return pauseAtEnd
+    ? `(() => { const endPause = ${PAUSE_AT_END_EXPR}; return { ...${STATE_EXPR}, endPause }; })()`
+    : STATE_EXPR;
+}
+
 function seekExpr(seconds, autoPlay) {
   return `(() => {
     const v = ${PICK_VIDEO};
     if (!v) return { ok: false, error: '页面里还没找到视频元素' };
+    if (v.readyState < 1 || !(v.duration > 0)) return { ok: false, error: '视频还在加载，正在等待定位' };
     const t = ${Number(seconds) || 0};
     try {
       if (window.player && typeof window.player.seek === 'function') window.player.seek(t);
@@ -71,6 +91,8 @@ class CdpController extends EventEmitter {
     this.connected = false;
     this.lastState = null;
     this.busy = false;
+    this.pauseAtEnd = true; // 启动后首次连接 / 轮询就关闭网页自动切集，无需先点歌。
+    this.playGeneration = 0;
   }
 
   setPort(port) { this.port = port; this.disconnect(); }
@@ -173,21 +195,47 @@ class CdpController extends EventEmitter {
   /** 读取播放状态 */
   async state(preferBvid = '') {
     await this.ensure(preferBvid);
-    const s = await this.evaluate(STATE_EXPR);
+    // 页面加载 / 换视频后控件可能重新生成，读取状态时再次确认，但不会重复点击已选项。
+    const s = await this.evaluate(stateExpr(this.pauseAtEnd));
     this.lastState = s;
     return s;
   }
 
+  /** 确认网页使用「播完暂停」；默认从应用启动连接时起生效。 */
+  async setPauseAtEnd() {
+    this.pauseAtEnd = true;
+    await this.ensure();
+    return this.evaluate(PAUSE_AT_END_EXPR);
+  }
+
   /** 跳转到指定秒 */
   async seek(seconds, autoPlay = true) {
+    const generation = ++this.playGeneration;
     await this.ensure();
-    let r = await this.evaluate(seekExpr(seconds, autoPlay));
-    if (!r || !r.ok) {
-      // 播放器可能还没加载好，等一会重试
-      for (let i = 0; i < 8 && (!r || !r.ok); i++) {
-        await sleep(450);
-        r = await this.evaluate(seekExpr(seconds, autoPlay));
+    return this.seekForRequest(seconds, autoPlay, generation);
+  }
+
+  async seekForRequest(seconds, autoPlay, generation) {
+    let r;
+    for (let i = 0; i < 9; i++) {
+      if (generation !== this.playGeneration) return { cancelled: true };
+      r = await this.evaluate(seekExpr(seconds, autoPlay));
+      if (generation !== this.playGeneration) return { cancelled: true };
+      if (r && r.ok) {
+        // currentTime 赋值被接受不等于 seek 已完成，等播放器实际落到目标时间。
+        for (let check = 0; check < 6; check++) {
+          await sleep(100);
+          if (generation !== this.playGeneration) return { cancelled: true };
+          const s = await this.evaluate(stateExpr(this.pauseAtEnd));
+          if (generation !== this.playGeneration) return { cancelled: true };
+          if (s && s.ok && s.mediaReady >= 1 && !s.seeking && Math.abs(s.t - (Number(seconds) || 0)) < 1) {
+            this.lastState = s;
+            return { ok: true, t: s.t, d: s.d };
+          }
+        }
+        r = { ok: false, error: '播放器未到达所选曲目，正在重新定位' };
       }
+      if (i < 8) await sleep(450);
     }
     if (!r || !r.ok) throw new Error((r && r.error) || '无法跳转，请确认已打开 B 站视频页');
     return r;
@@ -203,7 +251,9 @@ class CdpController extends EventEmitter {
 
   /** 切专辑：导航到另一个 BV，再跳到指定曲目 */
   async openVideo(bvid, startSeconds = 0, autoPlay = true) {
+    const generation = ++this.playGeneration;
     await this.ensure();
+    if (generation !== this.playGeneration) return { cancelled: true };
     const url = `https://www.bilibili.com/video/${bvid}/` + (startSeconds > 1 ? `?t=${Math.floor(startSeconds)}` : '');
     await this.send('Page.navigate', { url });
     this.target = { ...this.target, url };
@@ -211,21 +261,23 @@ class CdpController extends EventEmitter {
     let s = null;
     for (let i = 0; i < 40; i++) {
       await sleep(400);
+      if (generation !== this.playGeneration) return { cancelled: true };
       try {
-        s = await this.evaluate(STATE_EXPR);
+        s = await this.evaluate(stateExpr(this.pauseAtEnd));
+        if (generation !== this.playGeneration) return { cancelled: true };
+        this.lastState = s;
         if (s && s.ok && s.d > 1 && s.bvid === bvid) break;
       } catch (_) { /* 页面正在导航 */ }
       if (i === 12 || i === 26) {
+        if (generation !== this.playGeneration) return { cancelled: true };
         try { await this.send('Page.navigate', { url }); } catch (_) {}
       }
     }
+    if (!s || !s.ok || !(s.d > 1) || s.bvid !== bvid) throw new Error('视频尚未加载完成，未能定位到所选曲目');
     // 即使从 0 开始也走一次 seek：顺带把 autoplay 打开
     // （B 站导航过去后偶尔会停在暂停状态，看起来就像"播放一下就暂停"）
-    for (let i = 0; i < 6; i++) {
-      const r = await this.evaluate(seekExpr(startSeconds, autoPlay));
-      if (r && r.ok) break;
-      await sleep(500);
-    }
+    const r = await this.seekForRequest(startSeconds, autoPlay, generation);
+    if (r && r.cancelled) return r;
     return s;
   }
 
@@ -236,4 +288,4 @@ class CdpController extends EventEmitter {
   }
 }
 
-module.exports = { CdpController, STATE_EXPR, PICK_VIDEO };
+module.exports = { CdpController, STATE_EXPR, PICK_VIDEO, PAUSE_AT_END_EXPR };

@@ -68,6 +68,8 @@ const albums = [A, B];
   ok('曲目 end 未知 + 视频放完 → 结束', p.isTrackEnded({ track: { start: 0, end: 0 }, t: 433, d: 433, paused: true }) === true);
   ok('曲目 end 未知 + 还在放 → 不算结束', p.isTrackEnded({ track: { start: 0, end: 0 }, t: 433, d: 433, paused: false }) === false);
   ok('没有曲目表 + 视频放完 → 结束', p.isTrackEnded({ track: null, t: 300, d: 300, paused: true }) === true);
+  ok('视频最后半秒仍在播放 → 等待完整播完', p.isTrackEnded({ track: { start: 300, end: 400 }, t: 399.8, d: 400, paused: false }) === false);
+  ok('末曲时间戳超过视频时长 → 也不提前截断视频', p.isTrackEnded({ track: { start: 300, end: 700 }, t: 599.8, d: 600, paused: false }) === false);
 }
 
 console.log(fail ? `\n${fail} 项失败` : '\n全部通过');

@@ -92,9 +92,20 @@ function isTrackEnded({ track, t, d, paused }) {
   // 视频已经放到末尾停住 → 这首肯定结束了（曲目表里的 end 可能比视频短/长）
   if (paused && dur > 0 && cur >= dur - 0.5) return true;
   if (!track || !(track.end > 0)) return false;
+  // 整段视频的末曲等原生 ended / 末尾暂停信号，不把内部曲目边界的容差当作提前切歌。
+  if (dur > 0 && track.end >= dur - 0.5) return false;
   if (cur < track.end - 0.5) return false;
   // 到曲尾且视频还在放（同一张专辑里往后切）
   return !paused;
 }
 
-module.exports = { trackIndexAt, resolvePlaying, stepBaseAlbumId, isTrackEnded, cleanVideoTitle };
+/** 原视频接近末尾时换了 BV，可能是网页抢先连播；先让原队列接歌，不跟随到新专辑。 */
+function isVideoTail({ t, d, paused, pollMs = 1000 }) {
+  const dur = Number(d) || 0;
+  const cur = Number(t) || 0;
+  // 这是识别跳转的时间窗口，不用于提前结束或截掉歌曲。
+  const window = Math.max(3, (Number(pollMs) || 1000) / 1000 + 1);
+  return !paused && dur > 0 && cur >= Math.max(1, dur - window);
+}
+
+module.exports = { trackIndexAt, resolvePlaying, stepBaseAlbumId, isTrackEnded, isVideoTail, cleanVideoTitle };

@@ -38,6 +38,7 @@ if (SELF_TEST) {
 let store, cdp, mainWin, miniWin, tray = null;
 let quitting = false;
 let guardUntil = 0;          // 刚跳转后的保护期，避免轮询把高亮改回去
+let playIntent = null;       // 本次点歌目标；加载期间锁定，完成后短暂校验历史进度恢复。
 /** 用户手动选中了某张专辑但还没播（关掉「点专辑直接播放」时）：轮询别把视图拽回正在播的那张 */
 let selectionPin = null;     // { albumId, bvid }
 let lastAdvance = 0;
@@ -91,10 +92,11 @@ function currentTrack() {
 
 /** 真正在播放的专辑 / 曲目 / 进度（关掉「点专辑直接播放」后可能和选中项不同） */
 function playingInfo() {
+  const pending = playIntent && playIntent.loading ? playIntent : null;
   return playing.resolvePlaying({
     albums: albums(),
-    playingBvid: playback.bvid,
-    playingT: playback.t,
+    playingBvid: pending ? pending.bvid : playback.bvid,
+    playingT: pending ? pending.start : playback.t,
     playingD: playback.d,
     playingPaused: playback.paused,
     playingTitle: playback.title,
@@ -152,23 +154,24 @@ async function ensureConnection(preferBvid = '') {
   return true;
 }
 
-/** 从收藏夹里点一首歌：整个收藏夹变成播放列表（按收藏夹顺序，播完回到第一首） */
+/** 从收藏夹点歌：歌曲夹只播收藏的歌曲；专辑夹同时遵守专内播放范围。 */
 async function playFolderItem(folderId, item) {
   const f = folderById(folderId);
   if (!f) { setMessage('收藏夹不存在'); return false; }
-  const items = folderQueueItems(f);
-  if (!items.length) { setMessage('这个收藏夹里的歌都不在曲库里'); return false; }
-  const mode = settings().playMode || 'all-loop';
-  if (mode === 'album-shuffle' || mode === 'song-shuffle' || mode === 'album-random') shuffleArr(items);
-  let pos = -1;
+  let target = null;
   if (item) {
     const a = albums().find(x => x.bvid === item.bvid) || albums().find(x => x.id === item.albumId);
     if (a) {
       let idx = (a.tracks || []).findIndex(t => Math.abs((t.start || 0) - (item.start || 0)) < 2);
       if (idx < 0) idx = 0;
-      pos = items.findIndex(it => it.albumId === a.id && it.trackIndex === idx);
+      target = { albumId: a.id, trackIndex: idx };
     }
   }
+  const items = folderQueueItems(f, target || queueCurrent());
+  if (!items.length) { setMessage('这个收藏夹里的歌都不在曲库里'); return false; }
+  const mode = settings().playMode || 'all-loop';
+  if (mode === 'album-shuffle' || mode === 'song-shuffle' || mode === 'album-random') shuffleArr(items);
+  let pos = target ? items.findIndex(it => it.albumId === target.albumId && it.trackIndex === target.trackIndex) : -1;
   if (pos < 0) pos = 0;
   store.data.queue = { mode, items, pos, rev: Date.now(), source: { kind: 'folder', id: f.id, name: f.name } };
   store.save();
@@ -184,6 +187,8 @@ async function playAt(albumId, index, opts = {}) {
   selectionPin = null;   // 真的开播了，取消"手动选中"锁定
   const tracks = album.tracks || [];
   const i = Math.max(0, Math.min(index, Math.max(0, tracks.length - 1)));
+  const intent = { albumId, bvid: album.bvid, trackIndex: i, start: tracks[i] ? tracks[i].start : 0, loading: true };
+  playIntent = intent;
   // 先选中这张专辑，即使它还没有曲目表，右侧也要切过去显示空状态
   store.patch({ current: { albumId, trackIndex: i } });
   // 从收藏夹队列里跳出去播别的专辑 → 退出收藏夹队列，回到整库队列
@@ -199,22 +204,36 @@ async function playAt(albumId, index, opts = {}) {
   guardUntil = Date.now() + 3500;
   broadcast();
   if (!tracks.length) {
+    playIntent = null;
     setMessage('这张专辑还没有曲目表，可以点「按单曲填充」或编辑曲目');
     return false;
   }
   try {
     await ensureConnection(album.bvid);
-    const bvidNow = playback.bvid || (cdp.lastState && cdp.lastState.bvid) || '';
+    if (playIntent !== intent) return false;
+    await cdp.setPauseAtEnd();
+    if (playIntent !== intent) return false;
+    // 用刚读到的网页 BV，避免网页已跳走时还按缓存的 BV 在错误视频上 seek。
+    const browserState = await cdp.state();
+    if (playIntent !== intent) return false;
+    const bvidNow = browserState && browserState.bvid || '';
+    let result;
     if (bvidNow === album.bvid && cdp.lastState && cdp.lastState.ok) {
-      await cdp.seek(tracks[i].start, settings().autoPlay);
+      result = await cdp.seek(tracks[i].start, settings().autoPlay);
     } else {
-      await cdp.openVideo(album.bvid, tracks[i].start, settings().autoPlay);
+      result = await cdp.openVideo(album.bvid, tracks[i].start, settings().autoPlay);
     }
+    if (playIntent !== intent || (result && result.cancelled)) return false;
+    intent.loading = false;
+    intent.anchorAt = Date.now();
+    intent.protectUntil = opts.protectUntil || Date.now() + 10000;
     playback.bvid = album.bvid;
     playback.t = tracks[i].start;
     guardUntil = Date.now() + 2200;
     setMessage(`正在播放 · ${tracks[i].name}`);
   } catch (e) {
+    if (playIntent !== intent) return false;
+    playIntent = null;
     setMessage('控制浏览器失败：' + (e.message || e));
     return false;
   }
@@ -246,9 +265,17 @@ function isHiddenItem(it) {
   return !!(t && t.hidden);
 }
 
-/** 按当前模式重建播放队列（随机模式会在这里打乱） */
+/** 查看别的专辑时，队列仍以正在播放的曲目为准。 */
+function queueCurrent() {
+  const q = store.data.queue;
+  if (selectionPin && store.current.albumId === selectionPin.albumId && q && q.items && q.items[q.pos]) {
+    return q.items[q.pos];
+  }
+  return store.current;
+}
+
 /** 收藏夹里的条目 → 播放队列项（按收藏夹顺序；专辑项展开成整张曲目；不在曲库的跳过） */
-function folderQueueItems(f) {
+function folderQueueItems(f, cur = queueCurrent()) {
   const items = [];
   for (const it of (f && f.items) || []) {
     const a = albums().find(x => x.bvid === it.bvid) || albums().find(x => x.id === it.albumId);
@@ -260,6 +287,12 @@ function folderQueueItems(f) {
     let idx = a.tracks.findIndex(t => Math.abs((t.start || 0) - (it.start || 0)) < 2);
     if (idx < 0) idx = 0;
     items.push({ albumId: a.id, trackIndex: idx });
+  }
+  const mode = settings().playMode || 'all-loop';
+  if (f && f.type === 'album' && (mode === 'one' || mode === 'album-loop' || mode === 'album-shuffle')) {
+    const target = items.find(it => it.albumId === cur.albumId && it.trackIndex === cur.trackIndex)
+      || items.find(it => it.albumId === cur.albumId) || items[0];
+    return target ? items.filter(it => it.albumId === target.albumId && (mode !== 'one' || it.trackIndex === target.trackIndex)) : [];
   }
   return items;
 }
@@ -290,13 +323,14 @@ function syncFolderQueue(folderId) {
 
 function rebuildQueue() {
   const mode = settings().playMode || 'all-loop';
-  const cur = store.current;
+  const cur = queueCurrent();
   // 收藏夹队列：曲库/收藏夹变了就按收藏夹重新生成，别退回整库顺序
   const src = folderQueueSource();
   if (src) {
     const f = folderById(src.id);
-    const fitems = f ? folderQueueItems(f) : [];
+    const fitems = f ? folderQueueItems(f, cur) : [];
     if (fitems.length) {
+      if (mode === 'album-shuffle' || mode === 'song-shuffle' || mode === 'album-random') shuffleArr(fitems);
       const q0 = store.data.queue;
       let pos = fitems.findIndex(it => it.albumId === cur.albumId && it.trackIndex === cur.trackIndex);
       if (pos < 0) pos = Math.max(0, Math.min(q0.pos || 0, fitems.length - 1));
@@ -339,11 +373,12 @@ function rebuildQueue() {
 function ensureQueue() {
   const mode = settings().playMode || 'all-loop';
   const q = store.data.queue;
-  // 收藏夹队列：收藏夹还在就照用，不按播放顺序重建
+  // 收藏夹队列也要检查播放模式，专内模式只保留当前专辑。
   const src = folderQueueSource();
   if (src) {
     const f = folderById(src.id);
     if (f && Array.isArray(q.items) && q.items.length) {
+      if (q.mode !== mode) return rebuildQueue();
       // 收藏夹内容变了（增删歌）→ 重新生成一次，保证和收藏夹一致
       const fresh = folderQueueItems(f);
       const same = fresh.length === q.items.length &&
@@ -354,12 +389,11 @@ function ensureQueue() {
     return rebuildQueue();
   }
   // 手动选中某张专辑但还没播时，队列仍按"正在播的那张"算，别被选中项带偏
-  const cur = (selectionPin && store.current.albumId === selectionPin.albumId)
-    ? (albums().find(a => a.bvid === playback.bvid) || store.current)
-    : store.current;
+  const cur = queueCurrent();
   const albumScope = mode === 'one' || mode === 'album-loop' || mode === 'album-shuffle';
   const need = !q || !Array.isArray(q.items) || !q.items.length || q.mode !== mode ||
-    (albumScope && q.items[0] && q.items[0].albumId !== cur.albumId);
+    (albumScope && q.items[0] && q.items[0].albumId !== cur.albumId) ||
+    (mode === 'one' && q.items[0] && q.items[0].trackIndex !== cur.trackIndex);
   return need ? rebuildQueue() : q;
 }
 
@@ -376,7 +410,7 @@ function nextTrack() {
   const mode = settings().playMode || 'all-loop';
   let q = ensureQueue();
   if (!q.items.length) return;
-  if (mode === 'one') { playAt(store.current.albumId, store.current.trackIndex); return; }
+  if (mode === 'one') { const it = q.items[q.pos]; return playAt(it.albumId, it.trackIndex); }
   const skip = settings().skipHidden;
   let pos = q.pos, guard = 0;
   do {
@@ -392,14 +426,14 @@ function nextTrack() {
   const it = q.items[pos];
   if (!it) return;
   q.pos = pos;
-  playAt(it.albumId, it.trackIndex);
+  return playAt(it.albumId, it.trackIndex);
 }
 
 function prevTrack() {
   const mode = settings().playMode || 'all-loop';
   const q = ensureQueue();
   if (!q.items.length) return;
-  if (mode === 'one') { playAt(store.current.albumId, store.current.trackIndex); return; }
+  if (mode === 'one') { const it = q.items[q.pos]; return playAt(it.albumId, it.trackIndex); }
   const skip = settings().skipHidden;
   let pos = q.pos, guard = 0;
   do {
@@ -410,10 +444,10 @@ function prevTrack() {
   const it = q.items[pos];
   if (!it) return;
   q.pos = pos;
-  playAt(it.albumId, it.trackIndex);
+  return playAt(it.albumId, it.trackIndex);
 }
 
-function stepTrack(delta) { if (delta > 0) nextTrack(); else prevTrack(); }
+function stepTrack(delta) { return delta > 0 ? nextTrack() : prevTrack(); }
 
 function stepAlbum(delta) {
   if (!albums().length) return;
@@ -499,8 +533,11 @@ async function pollOnce() {
     return;
   }
   let s;
+  const intentAtRead = playIntent;
+  const wasLoading = !!(intentAtRead && intentAtRead.loading);
   try { s = await cdp.state(); }
   catch (e) {
+    if (intentAtRead !== playIntent || wasLoading || (playIntent && playIntent.loading)) return;
     conn.connected = false;
     conn.message = '连接中断，正在重试…';
     cdp.disconnect();
@@ -508,6 +545,27 @@ async function pollOnce() {
     return;
   }
   if (!s) return;
+  // 丢弃点歌前发出的旧轮询，以及尚未完成导航 / 定位时读到的历史播放进度。
+  if (intentAtRead !== playIntent || wasLoading || (playIntent && playIntent.loading)) return;
+  if (playIntent) {
+    const intent = playIntent;
+    if (Date.now() >= intent.protectUntil || (s.bvid && s.bvid !== intent.bvid)) {
+      playIntent = null;
+    } else if (!s.ok) {
+      return;
+    } else if (s.bvid === intent.bvid) {
+      const elapsed = Math.max(0, (Date.now() - intent.anchorAt) / 1000);
+      const rate = Math.max(1, Number(s.playbackRate) || 1);
+      const t = Number(s.t) || 0;
+      // B 站可能先接受 seek，再延迟恢复历史位置；实际播放不能瞬间多走几首歌。
+      if (t < intent.start - 1 || t > intent.start + elapsed * rate + 3) {
+        await playAt(intent.albumId, intent.trackIndex, { protectUntil: intent.protectUntil });
+        return;
+      }
+    }
+  }
+  const previous = { ...playback };
+  const browserChanged = playback.bvid !== (s.bvid || '');
   playback.t = s.t || 0;
   playback.d = s.d || 0;
   playback.paused = s.paused;
@@ -515,6 +573,24 @@ async function pollOnce() {
   playback.title = s.title || '';
 
   if (Date.now() > guardUntil) {
+    // 必须先判断原视频是否刚到曲尾，再让浏览器 BV 更新视图 / 重建队列。
+    // 否则网页抢先自动切集时，专内循环也会被误当成手动切换到下一张专辑。
+    const oldQueue = store.data.queue;
+    const oldItem = oldQueue && oldQueue.items && oldQueue.items[oldQueue.pos];
+    const oldAlbum = oldItem && albums().find(a => a.id === oldItem.albumId);
+    if (browserChanged && oldAlbum && previous.bvid === oldAlbum.bvid &&
+        playing.isVideoTail({ ...previous, pollMs: settings().pollMs })) {
+      if (Date.now() - lastAdvance > 2500) {
+        lastAdvance = Date.now();
+        guardUntil = Date.now() + 6000;
+        // 可能只是选中了另一张专辑查看；仍从原队列推进。
+        store.patch({ current: { albumId: oldItem.albumId, trackIndex: oldItem.trackIndex } });
+        selectionPin = null;
+        await nextTrack();
+      }
+      broadcast();
+      return;
+    }
     const byBv = s.bvid ? albums().find(a => a.bvid === s.bvid) : null;
     const fd = follow.pollFollow({
       playingBvid: s.bvid || '',
@@ -527,26 +603,45 @@ async function pollOnce() {
     if (fd.follow && byBv && byBv.tracks && byBv.tracks.length) {
       store.patch({ current: { albumId: byBv.id, trackIndex: 0 } });
     }
+    // 首次连接或用户在浏览器里换了视频时，先接上真实进度，避免把旧队列位置当作曲尾。
+    if (browserChanged && byBv && !s.ended && !fd.pinned) {
+      const idx = playing.trackIndexAt(byBv, s.t);
+      if (idx >= 0) {
+        store.patch({ current: { albumId: byBv.id, trackIndex: idx } });
+        const oldQueue = store.data.queue;
+        if (folderQueueSource() && !oldQueue.items.some(it => it.albumId === byBv.id && it.trackIndex === idx)) clearFolderQueue();
+        ensureQueue();
+        syncQueuePos();
+      }
+    }
+    // 先按队列中的当前曲目判断曲尾，再跟随视频时间更新高亮。
+    // 长视频可能已自然进入未收藏的下一首，不能拿那一首的 end 判断本首是否结束。
+    const q = byBv ? ensureQueue() : null;
+    const queued = q && q.items[q.pos];
+    const queuedTrack = queued && byBv && queued.albumId === byBv.id
+      ? byBv.tracks[queued.trackIndex] : null;
+    const playTr = queuedTrack || (byBv && byBv.tracks && byBv.tracks[playing.trackIndexAt(byBv, s.t)]);
+    const endedNow = !!s.ended || playing.isTrackEnded({ track: playTr, t: s.t, d: s.d, paused: s.paused });
+    // video.ended 也覆盖视频结束后暂停、进度被页面重置的情况。
+    if (byBv && endedNow) {
+      if (Date.now() - lastAdvance > 2500) {
+        lastAdvance = Date.now();
+        guardUntil = Date.now() + 6000;
+        await nextTrack();
+      }
+      broadcast();
+      return;
+    }
     const a = currentAlbum();
     if (a && a.bvid === s.bvid && a.tracks && a.tracks.length) {
       let idx = a.tracks.findIndex((tr, k) => s.t >= tr.start && (k === a.tracks.length - 1 || s.t < tr.end - 0.2));
       if (idx < 0 && s.t < a.tracks[0].start) idx = 0;
       // 自动同步不要落到隐藏曲目上，否则跳过之后高亮又会跳回被隐藏的条目
       if (settings().skipHidden && idx >= 0 && a.tracks[idx].hidden && idx !== store.current.trackIndex) idx = -1;
+      // 暂停在曲尾时也不要把当前项改成队列外的曲目。
+      if (q && idx >= 0 && !q.items.some(it => it.albumId === a.id && it.trackIndex === idx)) idx = -1;
       if (idx >= 0 && idx !== store.current.trackIndex) store.patch({ current: { ...store.current, trackIndex: idx } });
-    }
-    // 一曲结束 → 按当前播放顺序自动推进
-    // 用「浏览器里正在放的这张」判断曲尾，而不是"选中的那张"（可能只是手动选中在看）
-    const playTr = byBv && byBv.tracks
-      ? byBv.tracks.find((tr, k) => s.t >= tr.start && (k === byBv.tracks.length - 1 || s.t < tr.end - 0.2))
-      : null;
-    // video.ended 是最可靠的「这首放完了」信号（B 站放完会暂停，currentTime 也可能被重置）
-    const endedNow = !!s.ended || playing.isTrackEnded({ track: playTr, t: s.t, d: s.d, paused: s.paused });
-    // 只对曲库里的专辑自动接歌；用户在 B 站随便看的视频放完了不要乱跳
-    if (byBv && endedNow && Date.now() - lastAdvance > 2500) {
-      lastAdvance = Date.now();
-      guardUntil = Date.now() + 6000;   // 切歌/换页期间别再触发一次
-      nextTrack();
+      if (!fd.pinned) syncQueuePos();
     }
   }
   broadcast();
@@ -1057,6 +1152,7 @@ function registerIpc() {
   h('play:toggle', async () => togglePlay());
   h('play:replay', async () => replay());
   h('play:seek', async ({ seconds }) => {
+    playIntent = null; // 用户主动拖动进度后，以这次新操作为准。
     await ensureConnection();
     await cdp.seek(seconds, settings().autoPlay);
     guardUntil = Date.now() + 1500;

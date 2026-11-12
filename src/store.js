@@ -24,7 +24,7 @@ const defaultFolders = () => ([
 const DEFAULT_SETTINGS = {
   port: 9222,
   browserPath: '',
-  autoPlay: true,          // 切歌后自动播放
+  autoPlay: false,         // 切歌后自动播放：默认不勾选
   albumClickPlay: true,    // 点击资料库里的专辑时直接开始播放（关掉后只显示曲目，点播放才播）
   skipHidden: true,        // 隐藏的曲目播放时自动跳过
   playMode: 'all-loop',    // 播放顺序：one / album-loop / album-shuffle / all-loop / album-random / song-shuffle
