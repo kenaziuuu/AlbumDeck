@@ -12,6 +12,8 @@ const geo = require('./mini-geometry');
 const follow = require('./poll-follow');
 const playing = require('./playing');
 const sortMod = require('./sort-albums');
+const { StatePublisher } = require('./state-packets');
+const statePublisher = new StatePublisher();
 const miniSize = geo.miniSize;
 
 const ASSETS = path.join(__dirname, '..', 'assets');
@@ -40,11 +42,15 @@ let store, cdp, mainWin, miniWin, tray = null;
 let quitting = false;
 let guardUntil = 0;          // 刚跳转后的保护期，避免轮询把高亮改回去
 let playIntent = null;       // 本次点歌目标；加载期间锁定，完成后短暂校验历史进度恢复。
+let manualPause = false;     // 用户暂停与视频自然结束后的暂停分开处理。
+let stoppedTrack = null;     // 播完即停后保留本曲标题；再次按播放从本曲起点重播。
+let transportRevision = 0, transportPending = 0;
 /** 用户手动选中了某张专辑但还没播（关掉「点专辑直接播放」时）：轮询别把视图拽回正在播的那张 */
 let selectionPin = null;     // { albumId, bvid }
 let lastAdvance = 0;
 let lastMenuSignature = '';
 let pollTimer = null;
+let pollInFlight = false, broadcastPending = false;
 let autoConnectTick = 0;
 let importBusy = false;
 
@@ -94,6 +100,12 @@ function currentTrack() {
 /** 真正在播放的专辑 / 曲目 / 进度（关掉「点专辑直接播放」后可能和选中项不同） */
 function playingInfo() {
   const pending = playIntent && playIntent.loading ? playIntent : null;
+  if (stoppedTrack && manualPause) {
+    const album = albums().find(a => a.id === stoppedTrack.albumId && a.bvid === playback.bvid);
+    const track = album && album.tracks[stoppedTrack.trackIndex];
+    if (track) return { album, track, trackIndex: stoppedTrack.trackIndex,
+      t: Math.min(playback.t, track.end || playback.t), d: playback.d, paused: true };
+  }
   return playing.resolvePlaying({
     albums: albums(),
     playingBvid: pending ? pending.bvid : playback.bvid,
@@ -115,7 +127,7 @@ function snapshot() {
   if (curAlbum && pb.bvid && pb.bvid !== curAlbum.bvid) { pb.t = 0; pb.d = 0; pb.paused = true; }
   return {
     albums: albums(),
-    folders: JSON.parse(JSON.stringify(folders())),
+    folders: folders(),
     queue: store.data.queue ? {
       mode: store.data.queue.mode,
       pos: store.data.queue.pos,
@@ -127,7 +139,8 @@ function snapshot() {
     playing: playingInfo(),
     playback: pb,
     conn: { ...conn },
-    settings: JSON.parse(JSON.stringify(settings())),
+    settings: settings(),
+    dataRevision: store.revision || 0,
     playModes: PLAY_MODES,
     message: Date.now() - messageAt < 6000 ? message : '',
     importBusy
@@ -135,16 +148,25 @@ function snapshot() {
 }
 
 function broadcast() {
-  const s = snapshot();
-  for (const w of [mainWin, miniWin]) {
-    if (w && !w.isDestroyed() && w.webContents) w.webContents.send('state', s);
-  }
-  updateTrayMenu(s);
+  if (broadcastPending) return;
+  broadcastPending = true;
+  Promise.resolve().then(() => {
+    broadcastPending = false;
+    if (!store) return;
+    const s = snapshot();
+    for (const w of [mainWin, miniWin]) {
+      if (w && !w.isDestroyed() && w.webContents && w.isVisible() && !w.isMinimized()) {
+        w.webContents.send('state', statePublisher.packet(s, store.revision, w.webContents));
+      }
+    }
+    updateTrayMenu(s);
+  });
 }
 
 /* ---------------- 控制逻辑 ---------------- */
 
 async function ensureConnection(preferBvid = '') {
+  cdp.prefer360p = settings().prefer360p !== false;
   if (cdp.connected && cdp.ws && cdp.ws.readyState === 1) return true;
   await cdp.connect(preferBvid);
   conn.connected = true;
@@ -185,10 +207,13 @@ async function playFolderItem(folderId, item) {
 async function playAt(albumId, index, opts = {}) {
   const album = albums().find(a => a.id === albumId);
   if (!album) { setMessage('找不到这张专辑'); return false; }
+  transportRevision++;
+  stoppedTrack = null;
   selectionPin = null;   // 真的开播了，取消"手动选中"锁定
   const tracks = album.tracks || [];
   const i = Math.max(0, Math.min(index, Math.max(0, tracks.length - 1)));
-  const intent = { albumId, bvid: album.bvid, trackIndex: i, start: tracks[i] ? tracks[i].start : 0, loading: true };
+  const intent = { albumId, bvid: album.bvid, trackIndex: i, start: tracks[i] ? tracks[i].start : 0, loading: true, play: opts.play !== false };
+  manualPause = !intent.play;
   playIntent = intent;
   // 先选中这张专辑，即使它还没有曲目表，右侧也要切过去显示空状态
   store.patch({ current: { albumId, trackIndex: i } });
@@ -220,18 +245,24 @@ async function playAt(albumId, index, opts = {}) {
     const bvidNow = browserState && browserState.bvid || '';
     let result;
     if (bvidNow === album.bvid && cdp.lastState && cdp.lastState.ok) {
-      result = await cdp.seek(tracks[i].start, settings().autoPlay);
+      result = await cdp.seek(tracks[i].start, intent.play);
     } else {
-      result = await cdp.openVideo(album.bvid, tracks[i].start, settings().autoPlay);
+      result = await cdp.openVideo(album.bvid, tracks[i].start, intent.play);
     }
     if (playIntent !== intent || (result && result.cancelled)) return false;
+    if (result && result.userOverride) {
+      intent.play = !result.paused;
+      manualPause = !!result.paused;
+    }
     intent.loading = false;
     intent.anchorAt = Date.now();
+    intent.anchorT = result && Number.isFinite(result.t) ? result.t : tracks[i].start;
     intent.protectUntil = opts.protectUntil || Date.now() + 10000;
     playback.bvid = album.bvid;
-    playback.t = tracks[i].start;
+    playback.t = result && Number.isFinite(result.t) ? result.t : tracks[i].start;
+    playback.paused = !intent.play;
     guardUntil = Date.now() + 2200;
-    setMessage(`正在播放 · ${tracks[i].name}`);
+    setMessage(`${intent.play ? '正在播放' : '已暂停'} · ${tracks[i].name}`);
   } catch (e) {
     if (playIntent !== intent) return false;
     playIntent = null;
@@ -244,12 +275,13 @@ async function playAt(albumId, index, opts = {}) {
 /* ---------------- 播放队列 / 播放顺序 ---------------- */
 
 const PLAY_MODES = [
-  { key: 'one', label: '专内单曲循环', short: '单曲循环', scope: '专内' },
-  { key: 'album-loop', label: '专内循环播放', short: '专内循环', scope: '专内' },
-  { key: 'album-shuffle', label: '专内随机播放', short: '专内随机', scope: '专内' },
-  { key: 'all-loop', label: '全专循环播放', short: '全专循环', scope: '全库' },
-  { key: 'album-random', label: '专辑随机播放', short: '专辑随机', scope: '全库' },
-  { key: 'song-shuffle', label: '全专歌曲随机', short: '歌曲随机', scope: '全库' }
+  { key: 'one', label: '专内单曲循环', short: '单曲循环', scope: '专内', endAction: 'repeat' },
+  { key: 'album-loop', label: '专内循环播放', short: '专内循环', scope: '专内', endAction: 'next' },
+  { key: 'album-shuffle', label: '专内随机播放', short: '专内随机', scope: '专内', endAction: 'next' },
+  { key: 'all-loop', label: '全专循环播放', short: '全专循环', scope: '全库', endAction: 'next' },
+  { key: 'album-random', label: '专辑随机播放', short: '专辑随机', scope: '全库', endAction: 'next' },
+  { key: 'song-shuffle', label: '全专歌曲随机', short: '歌曲随机', scope: '全库', endAction: 'next' },
+  { key: 'once', label: '播完即停', short: '播完即停', scope: '单曲', endAction: 'pause' }
 ];
 
 function shuffleArr(arr) {
@@ -290,6 +322,10 @@ function folderQueueItems(f, cur = queueCurrent()) {
     items.push({ albumId: a.id, trackIndex: idx });
   }
   const mode = settings().playMode || 'all-loop';
+  if (mode === 'once') {
+    const target = items.find(it => it.albumId === cur.albumId && it.trackIndex === cur.trackIndex) || items[0];
+    return target ? [target] : [];
+  }
   if (f && f.type === 'album' && (mode === 'one' || mode === 'album-loop' || mode === 'album-shuffle')) {
     const target = items.find(it => it.albumId === cur.albumId && it.trackIndex === cur.trackIndex)
       || items.find(it => it.albumId === cur.albumId) || items[0];
@@ -345,7 +381,7 @@ function rebuildQueue() {
   const curAlbum = albums().find(a => a.id === cur.albumId) || albums()[0];
   const items = [];
   if (curAlbum) {
-    if (mode === 'one') {
+    if (mode === 'one' || mode === 'once') {
       const idx = Math.max(0, Math.min(cur.trackIndex, (curAlbum.tracks || []).length - 1));
       items.push({ albumId: curAlbum.id, trackIndex: idx });
     } else if (mode === 'album-loop' || mode === 'album-shuffle') {
@@ -391,10 +427,10 @@ function ensureQueue() {
   }
   // 手动选中某张专辑但还没播时，队列仍按"正在播的那张"算，别被选中项带偏
   const cur = queueCurrent();
-  const albumScope = mode === 'one' || mode === 'album-loop' || mode === 'album-shuffle';
+  const albumScope = mode === 'one' || mode === 'once' || mode === 'album-loop' || mode === 'album-shuffle';
   const need = !q || !Array.isArray(q.items) || !q.items.length || q.mode !== mode ||
     (albumScope && q.items[0] && q.items[0].albumId !== cur.albumId) ||
-    (mode === 'one' && q.items[0] && q.items[0].trackIndex !== cur.trackIndex);
+    ((mode === 'one' || mode === 'once') && q.items[0] && q.items[0].trackIndex !== cur.trackIndex);
   return need ? rebuildQueue() : q;
 }
 
@@ -406,6 +442,37 @@ function syncQueuePos() {
 }
 
 function refreshQueue() { rebuildQueue(); syncQueuePos(); }
+
+function setPlayMode(mode) {
+  if (!PLAY_MODES.some(m => m.key === mode)) throw new Error('未知的播放顺序');
+  store.patchSettings({ playMode: mode });
+  rebuildQueue(); syncQueuePos();
+  broadcast();
+  return mode;
+}
+
+/** 自然曲尾只执行该模式定义的动作，不能把网页结束暂停当作手动暂停。 */
+async function finishTrack(restore = false) {
+  const mode = PLAY_MODES.find(m => m.key === settings().playMode);
+  if (!mode || mode.endAction !== 'pause') return nextTrack();
+  const item = queueCurrent();
+  const target = { albumId: item.albumId, trackIndex: item.trackIndex };
+  manualPause = true;
+  playIntent = null;
+  let revision = ++transportRevision;
+  transportPending++;
+  try {
+    if (restore) {
+      const request = playAt(target.albumId, target.trackIndex, { play: false });
+      revision = transportRevision;
+      if (!await request) return;
+    } else await cdp.togglePlay('pause');
+    if (revision !== transportRevision) return;
+    stoppedTrack = target;
+    playback.paused = true;
+    setMessage('本曲播放结束，已暂停');
+  } finally { transportPending--; }
+}
 
 function nextTrack() {
   const mode = settings().playMode || 'all-loop';
@@ -487,16 +554,53 @@ function stepAlbum(delta) {
 }
 
 async function togglePlay() {
-  const a = currentAlbum();
-  const loaded = playback.bvid || (cdp.lastState && cdp.lastState.bvid) || '';
-  // 有东西正在放 → 这一下就是"暂停"（按钮图标显示的也是暂停），别跳到别的专辑去
-  // 只有当前没在放、且选中的专辑还没在浏览器里打开时，才开播它
-  if (a && loaded !== a.bvid && playback.paused) return playAt(a.id, store.current.trackIndex || 0);
+  const revision = ++transportRevision;
+  transportPending++;
+  try {
+    const a = currentAlbum();
+    const loaded = playback.bvid || (cdp.lastState && cdp.lastState.bvid) || '';
+    // 暂停且选中另一张专辑时开播所选项；播完即停后按播放则重播本曲。
+    if (a && loaded !== a.bvid && playback.paused) return playAt(a.id, store.current.trackIndex || 0);
+    if (stoppedTrack && manualPause) return playAt(stoppedTrack.albumId, stoppedTrack.trackIndex);
+    await ensureConnection();
+    if (revision !== transportRevision) return;
+    const r = await cdp.togglePlay();
+    if (revision !== transportRevision) return;
+    if (r && r.ok) {
+      playback.paused = r.paused;
+      manualPause = !!r.paused;
+      if (playIntent) {
+        playIntent.play = !r.paused;
+        if (r.paused && playIntent.loading) { playIntent = null; cdp.cancelPendingPlay(); }
+      }
+      setMessage(r.paused ? '已暂停' : '继续播放');
+    }
+  } catch (e) { setMessage('控制浏览器失败：' + e.message); }
+  finally { transportPending--; }
+}
+
+/** 拖动进度保持实际的播放 / 暂停状态。 */
+async function seekTo(seconds) {
+  const revision = ++transportRevision;
+  transportPending++;
+  playIntent = null;
+  stoppedTrack = null;
   try {
     await ensureConnection();
-    const r = await cdp.togglePlay();
-    if (r && r.ok) { playback.paused = r.paused; setMessage(r.paused ? '已暂停' : '继续播放'); }
-  } catch (e) { setMessage('控制浏览器失败：' + e.message); }
+    if (revision !== transportRevision) return false;
+    const state = await cdp.state();
+    if (revision !== transportRevision) return false;
+    let play = !state.paused;
+    const result = await cdp.seek(seconds, play);
+    if (revision !== transportRevision || (result && result.cancelled)) return false;
+    if (result && result.userOverride) play = !result.paused;
+    manualPause = !play;
+    playback.t = seconds;
+    playback.paused = !play;
+    guardUntil = Date.now() + 1500;
+    broadcast();
+    return true;
+  } finally { transportPending--; }
 }
 
 /** 只切换当前专辑（显示曲目列表），不操作浏览器 */
@@ -536,9 +640,12 @@ async function pollOnce() {
   let s;
   const intentAtRead = playIntent;
   const wasLoading = !!(intentAtRead && intentAtRead.loading);
+  const revisionAtRead = transportRevision, wasTransportPending = transportPending > 0;
+  cdp.prefer360p = settings().prefer360p !== false;
   try { s = await cdp.state(); }
   catch (e) {
-    if (intentAtRead !== playIntent || wasLoading || (playIntent && playIntent.loading)) return;
+    if (intentAtRead !== playIntent || wasLoading || (playIntent && playIntent.loading) ||
+        revisionAtRead !== transportRevision || wasTransportPending || transportPending > 0) return;
     conn.connected = false;
     conn.message = '连接中断，正在重试…';
     cdp.disconnect();
@@ -547,7 +654,13 @@ async function pollOnce() {
   }
   if (!s) return;
   // 丢弃点歌前发出的旧轮询，以及尚未完成导航 / 定位时读到的历史播放进度。
-  if (intentAtRead !== playIntent || wasLoading || (playIntent && playIntent.loading)) return;
+  if (intentAtRead !== playIntent || wasLoading || (playIntent && playIntent.loading) ||
+      revisionAtRead !== transportRevision || wasTransportPending || transportPending > 0) return;
+  if (!s.paused) { manualPause = false; stoppedTrack = null; }
+  else if (s.ended === false) {
+    manualPause = true;
+    if (playIntent) playIntent.play = false;
+  }
   if (playIntent) {
     const intent = playIntent;
     if (Date.now() >= intent.protectUntil || (s.bvid && s.bvid !== intent.bvid)) {
@@ -559,14 +672,15 @@ async function pollOnce() {
       const rate = Math.max(1, Number(s.playbackRate) || 1);
       const t = Number(s.t) || 0;
       // B 站可能先接受 seek，再延迟恢复历史位置；实际播放不能瞬间多走几首歌。
-      if (t < intent.start - 1 || t > intent.start + elapsed * rate + 3) {
-        await playAt(intent.albumId, intent.trackIndex, { protectUntil: intent.protectUntil });
+      if (t < intent.start - 1 || t > intent.anchorT + elapsed * rate + 3) {
+        await playAt(intent.albumId, intent.trackIndex, { protectUntil: intent.protectUntil, play: intent.play && !manualPause });
         return;
       }
     }
   }
   const previous = { ...playback };
   const browserChanged = playback.bvid !== (s.bvid || '');
+  if (browserChanged) stoppedTrack = null;
   playback.t = s.t || 0;
   playback.d = s.d || 0;
   playback.paused = s.paused;
@@ -579,7 +693,7 @@ async function pollOnce() {
     const oldQueue = store.data.queue;
     const oldItem = oldQueue && oldQueue.items && oldQueue.items[oldQueue.pos];
     const oldAlbum = oldItem && albums().find(a => a.id === oldItem.albumId);
-    if (browserChanged && oldAlbum && previous.bvid === oldAlbum.bvid &&
+    if (!manualPause && browserChanged && oldAlbum && previous.bvid === oldAlbum.bvid &&
         playing.isVideoTail({ ...previous, pollMs: settings().pollMs })) {
       if (Date.now() - lastAdvance > 2500) {
         lastAdvance = Date.now();
@@ -587,7 +701,7 @@ async function pollOnce() {
         // 可能只是选中了另一张专辑查看；仍从原队列推进。
         store.patch({ current: { albumId: oldItem.albumId, trackIndex: oldItem.trackIndex } });
         selectionPin = null;
-        await nextTrack();
+        await finishTrack(true);
       }
       broadcast();
       return;
@@ -622,13 +736,14 @@ async function pollOnce() {
     const queuedTrack = queued && byBv && queued.albumId === byBv.id
       ? byBv.tracks[queued.trackIndex] : null;
     const playTr = queuedTrack || (byBv && byBv.tracks && byBv.tracks[playing.trackIndexAt(byBv, s.t)]);
-    const endedNow = !!s.ended || playing.isTrackEnded({ track: playTr, t: s.t, d: s.d, paused: s.paused });
+    const endedNow = playing.isTrackEnded({ track: playTr, t: s.t, d: s.d, paused: s.paused, ended: s.ended,
+      leadSeconds: settings().playMode === 'once' ? 0 : 0.5 });
     // video.ended 也覆盖视频结束后暂停、进度被页面重置的情况。
     if (byBv && endedNow) {
-      if (Date.now() - lastAdvance > 2500) {
+      if (!manualPause && Date.now() - lastAdvance > 2500) {
         lastAdvance = Date.now();
         guardUntil = Date.now() + 6000;
-        await nextTrack();
+        await finishTrack();
       }
       broadcast();
       return;
@@ -650,7 +765,11 @@ async function pollOnce() {
 
 function startPolling() {
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(() => { pollOnce().catch(() => {}); }, Math.max(400, settings().pollMs || 1000));
+  pollTimer = setInterval(async () => {
+    if (pollInFlight) return;
+    pollInFlight = true;
+    try { await pollOnce(); } catch (_) {} finally { pollInFlight = false; }
+  }, Math.max(400, settings().pollMs || 1000));
 }
 
 /* ---------------- 浏览器启动 ---------------- */
@@ -743,6 +862,8 @@ function createMain() {
     if (!quitting) { e.preventDefault(); mainWin.hide(); return; }
   });
   mainWin.on('closed', () => { mainWin = null; });
+  mainWin.on('show', broadcast);
+  mainWin.on('restore', broadcast);
   mainWin.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
 }
 
@@ -760,12 +881,13 @@ function createMini() {
   miniWin.setAlwaysOnTop(true, 'screen-saver');
   miniWin.loadFile(path.join(__dirname, 'mini.html'));
   miniWin.once('ready-to-show', () => { if (settings().miniVisible) miniWin.showInactive(); });
+  miniWin.on('show', broadcast);
   miniWin.on('close', e => { if (!quitting) { e.preventDefault(); miniWin.hide(); } });
   miniWin.on('moved', () => {
     if (!miniWin || miniWin.isDestroyed() || miniCollapsed) return;
     // 卡片被拖走：弹窗跟着收起，避免浮在原处
     if (miniPopWin && !miniPopWin.isDestroyed() && miniPopWin.isVisible()) { hideMiniPop(); return; }
-    store.data.miniBounds = miniWin.getBounds(); store.save();
+    store.data.miniBounds = miniWin.getBounds(); store.scheduleSave();
     if (!settings().miniEdgeHide) return;
     const edge = miniEdgeOf(miniWin.getBounds());
     if (edge) {
@@ -780,6 +902,7 @@ function createMini() {
       miniWin.setBounds({ x: b.x, y: b.y, width: sz2.width, height: sz2.height });
     } catch (_) {}
   }
+  if (!miniWatchTimer) startMiniWatch();
 }
 
 /* ── 悬浮窗样式 / 贴边自动隐藏 ── */
@@ -1109,7 +1232,8 @@ function hideTrayMenu() {
 
 function updateTrayMenu(s) {
   if (!tray || tray.isDestroyed()) return;
-  tray.setToolTip('唱片台 · ' + (s.current.track ? s.current.track.name : 'AlbumDeck'));
+  const tip = '唱片台 · ' + (s.current.track ? s.current.track.name : 'AlbumDeck');
+  if (tip !== lastMenuSignature) { lastMenuSignature = tip; tray.setToolTip(tip); }
   // 菜单打开期间不刷新：每秒 broadcast 会重建 DOM，把 hover 的快捷键浮窗打断
 }
 
@@ -1142,25 +1266,19 @@ function registerIpc() {
   h('play:prev', async () => stepTrack(-1));
   h('play:albumNext', async () => stepAlbum(1));
   h('play:albumPrev', async () => stepAlbum(-1));
-  h('play:setMode', (mode) => {
-    if (!PLAY_MODES.some(m => m.key === mode)) throw new Error('未知的播放顺序');
-    store.patchSettings({ playMode: mode });
-    rebuildQueue();          // 随机模式在这里打乱队列
-    syncQueuePos();          // 保持当前播放不中断，只重新定位
-    broadcast();
-    return mode;
-  });
+  h('play:setMode', mode => setPlayMode(mode));
   h('play:toggle', async () => togglePlay());
   h('play:replay', async () => replay());
-  h('play:seek', async ({ seconds }) => {
-    playIntent = null; // 用户主动拖动进度后，以这次新操作为准。
-    await ensureConnection();
-    await cdp.seek(seconds, settings().autoPlay);
-    guardUntil = Date.now() + 1500;
-    return true;
-  });
+  h('play:seek', async ({ seconds }) => seekTo(seconds));
   h('play:bvid', async ({ bvid }) => {
-    try { await ensureConnection(bvid); await cdp.openVideo(bvid, 0, settings().autoPlay); return true; }
+    try {
+      const revision = ++transportRevision;
+      playIntent = null; stoppedTrack = null; manualPause = false;
+      await ensureConnection(bvid);
+      if (revision !== transportRevision) return false;
+      const result = await cdp.openVideo(bvid, 0, true);
+      return revision === transportRevision && !(result && result.cancelled);
+    }
     catch (e) { setMessage('打开失败：' + e.message); return false; }
   });
 
@@ -1507,6 +1625,10 @@ function registerIpc() {
     const oldPort = settings().port;
     store.patchSettings(patch);
     if (patch.port && patch.port !== oldPort) cdp.setPort(patch.port);
+    if (patch.prefer360p != null) {
+      cdp.prefer360p = settings().prefer360p !== false;
+      if (cdp.connected) cdp.state().catch(() => {});
+    }
     if (patch.hotkeys) registerHotkeys();
     if (patch.pollMs) startPolling();
     if (patch.browserPath) cdp.browser = undefined;
@@ -1636,6 +1758,7 @@ if (!gotLock) {
     // 自检用不存在的端口，避免误连并打断用户正在播放的浏览器
     if (SELF_TEST) store.patchSettings({ port: 9339 });
     cdp = new CdpController(settings().port || 9222);
+    cdp.prefer360p = settings().prefer360p !== false;
     if (!store.albums.length) {
       store.albums = loadSeed();
       store.patch({ current: { albumId: store.albums[0] ? store.albums[0].id : null, trackIndex: 0 } });
@@ -1656,6 +1779,12 @@ if (!gotLock) {
           await sleep(100);
         }
         if (!state.albums.length || rows !== state.albums.length) throw new Error('主页面未正常渲染曲库');
+        const settingsUi = await checkWindow.webContents.executeJavaScript(`(() => {
+          document.querySelector('#btnSettings').click();
+          return { opened: document.querySelector('#settingsModal').classList.contains('show'),
+            obsolete: !!document.querySelector('#sAutoPlay'), prefer360p: document.querySelector('#sPrefer360p').checked };
+        })()`);
+        if (!settingsUi.opened || settingsUi.obsolete || !settingsUi.prefer360p) throw new Error('设置页面或默认播放开关状态不正确');
         console.log('PACK_CHECK_OK', JSON.stringify({ version: app.getVersion(), albums: state.albums.length, rows }));
         app.exit(0);
       }).catch(error => { console.error('PACK_CHECK_FAILED', error); app.exit(1); });
@@ -1664,11 +1793,10 @@ if (!gotLock) {
     conn.port = settings().port || 9222;
     registerIpc();
     createMain();
-    createMini();
+    if (settings().miniVisible) createMini();
     createTray();
     registerHotkeys();
     startPolling();
-    startMiniWatch();
     // 启动时尝试连接已在运行的调试浏览器
     cdp.version().then(v => { if (v) ensureConnection().catch(() => {}); }).catch(() => {});
     setTimeout(() => broadcast(), 800);
@@ -2134,6 +2262,18 @@ if (!gotLock) {
             await sleep(400);
             const b3 = miniWin.getBounds();
             out.summonFromCollapsed = { atHome: b3.x === home.x && b3.y === home.y, collapsed: miniCollapsed };
+            // 隐藏期间不发送全量状态，恢复显示时仍须显示最新曲库。
+            mainWin.hide(); miniWin.hide();
+            const track = currentTrack(), oldName = track.name;
+            track.name = '隐藏后更新的曲目'; store.save(); broadcast();
+            await sleep(100);
+            showMain(); summonMini(); await sleep(300);
+            out.restoredState = {
+              main: await mainWin.webContents.executeJavaScript("document.querySelector('#nowTrack').textContent"),
+              mini: await miniWin.webContents.executeJavaScript("document.querySelector('#mName').textContent")
+            };
+            if (out.restoredState.main !== track.name || out.restoredState.mini !== track.name) throw new Error('隐藏窗口恢复后状态未更新');
+            track.name = oldName; store.save(); broadcast();
             console.log('SUMMON TEST:', JSON.stringify(out));
             setTimeout(() => { quitting = true; app.quit(); }, 300);
             return;
@@ -2219,7 +2359,7 @@ if (!gotLock) {
             out.fav.countAfterRemove = folders()[0] ? folders()[0].items.length : 0;
             out.fav.removed = out.fav.countAfterRemove === cnt0;
 
-            /* 4) 右键播放顺序：弹出六种 */
+            /* 4) 右键播放顺序：弹出全部方式 */
             await inWin(miniWin, `document.querySelector('#mMode').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true}))`);
             out.mode = { openMs: await waitPop(true) };
             await sleep(300);
@@ -2687,11 +2827,11 @@ if (!gotLock) {
             dataFile: store.file, seedTracks: (albums()[0] && albums()[0].tracks || []).length
           }, null, 2));
           console.log('SHOT OK');
-        } catch (e) { console.error('SHOT FAIL', e); }
+        } catch (e) { console.error('SHOT FAIL', e); app.exit(1); return; }
         app.exit(0);
       }, 2600);
     }
   });
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); cdp && cdp.disconnect(); });
+  app.on('will-quit', () => { store && store.flush(); globalShortcut.unregisterAll(); cdp && cdp.disconnect(); });
   app.on('window-all-closed', e => { /* 常驻托盘，不退出 */ });
 }

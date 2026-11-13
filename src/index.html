@@ -212,11 +212,12 @@
 
       <h3>播放</h3>
       <div class="toggles">
-        <label><input type="checkbox" id="sAutoPlay"> 切歌后自动播放</label>
+        <label><input type="checkbox" id="sPrefer360p"> 优先使用 360P 视频（保留当前音质）</label>
         <label><input type="checkbox" id="sAlbumClickPlay"> 点击资料库专辑时直接播放（关掉则先只显示曲目）</label>
         <label><input type="checkbox" id="sSkipHidden"> 隐藏的曲目自动跳过</label>
       </div>
-      <p class="muted small-note">「切歌后自动播放」默认关闭。应用每次启动连接 B 站后，会自动关闭网页的「自动切集」，设为「播完暂停」。</p>
+      <p class="muted small-note">360P 可减少视频加载量。仅在支持独立切换视频流时生效，不调整当前音轨、Hi-Res 或杜比音质；不支持时保留原画质。</p>
+      <p class="muted small-note">循环和随机播放会自动接歌；「播完即停」只播放当前曲目。手动暂停时保持暂停。应用会将 B 站设为「播完暂停」，由唱片台负责重播和切歌。</p>
 
       <h3>悬浮窗</h3>
       <div class="toggles">
@@ -319,6 +320,7 @@
 <!-- 收藏目标选择浮层 -->
 <div class="pop-menu" id="popMenu"></div>
 
+<script src="state-packets.js"></script>
 <script src="renderer.js"></script>
 </body>
 </html>

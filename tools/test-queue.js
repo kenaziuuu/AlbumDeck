@@ -3,9 +3,10 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const vm = require('node:vm');
 const { createRequire } = require('node:module');
-const { DEFAULT_SETTINGS } = require('../src/store');
+const { Store, DEFAULT_SETTINGS } = require('../src/store');
 
 const mainPath = path.join(__dirname, '../src/main.js');
 const mainSource = fs.readFileSync(mainPath, 'utf8');
@@ -31,18 +32,29 @@ function fixture(mode = 'all-loop') {
     patchSettings(patch) { Object.assign(data.settings, patch); }
   };
   const commands = [];
+  const playRequests = [];
   const browser = {
     connected: true, ws: { readyState: 1 }, lastState: { ok: true }, report: {},
     disconnect() { this.connected = false; },
     async state() { this.lastState = this.report; return this.report; },
     async setPauseAtEnd() { this.pauseAtEnd = true; return { ok: true }; },
-    async seek(t) {
-      commands.push({ albumId: data.current.albumId, t });
-      this.report = { ok: true, bvid: `BV_${data.current.albumId}`, t, d: 400, paused: false };
+    cancelPendingPlay() {},
+    async togglePlay(force = '') {
+      this.report.paused = force ? force === 'pause' : !this.report.paused;
+      this.lastState = this.report;
+      return { ok: true, paused: this.report.paused };
     },
-    async openVideo(bvid, t) {
+    async seek(t, play = true) {
       commands.push({ albumId: data.current.albumId, t });
-      this.report = { ok: true, bvid, t, d: 400, paused: false };
+      playRequests.push(play);
+      this.report = { ok: true, bvid: `BV_${data.current.albumId}`, t, d: 400, paused: !play, ended: false };
+      this.lastState = this.report;
+    },
+    async openVideo(bvid, t, play = true) {
+      commands.push({ albumId: data.current.albumId, t });
+      playRequests.push(play);
+      this.report = { ok: true, bvid, t, d: 400, paused: !play, ended: false };
+      this.lastState = this.report;
     }
   };
   const context = vm.createContext({
@@ -57,7 +69,7 @@ function fixture(mode = 'all-loop') {
   vm.runInContext(mainSource + `
     store = testStore; cdp = testBrowser;
     globalThis.deck = { playFolderItem, playAt, nextTrack, prevTrack, pollOnce, selectAlbum,
-      rebuildQueue, syncFolderQueue, clearFolderQueue, ensureQueue, snapshot };
+      rebuildQueue, syncFolderQueue, clearFolderQueue, ensureQueue, snapshot, togglePlay, setPlayMode, seekTo };
   `, context, { filename: mainPath });
   const deck = context.deck;
   const song = (albumId, trackIndex) => ({ kind: 'song', albumId, bvid: `BV_${albumId}`, start: trackIndex * 100 });
@@ -65,11 +77,11 @@ function fixture(mode = 'all-loop') {
   const albumFolder = { id: 'albums', name: '专辑夹', type: 'album', items: ['A', 'B'].map(albumId => ({ kind: 'album', albumId, bvid: `BV_${albumId}` })) };
   data.folders.push(songFolder, albumFolder);
   return {
-    data, deck, song, commands, songFolder, browser,
+    data, deck, song, commands, playRequests, songFolder, browser,
     queue: () => Array.from(data.queue.items, it => `${it.albumId}:${it.trackIndex}`),
     async poll(albumId, t, extra = {}, elapsedMs = 10000) {
       now += elapsedMs; // 默认跳过切歌保护期，也可模拟加载中的轮询和延迟历史恢复。
-      browser.report = { ok: true, bvid: `BV_${albumId}`, t, d: 400, paused: false, ...extra };
+      browser.report = { ok: true, bvid: `BV_${albumId}`, t, d: 400, paused: false, ended: false, ...extra };
       await deck.pollOnce();
       await new Promise(resolve => setImmediate(resolve));
     }
@@ -245,10 +257,10 @@ test('应用点歌会开启 B 站播完暂停，由应用接管连播', async ()
   assert.equal(f.browser.pauseAtEnd, true);
 });
 
-test('播完暂停：不依赖 ended 标记，也能在视频末尾自动回本专辑第一首', async () => {
+test('播完暂停：缺少 ended 字段时兼容视频末尾状态并回本专辑第一首', async () => {
   const f = fixture('album-loop');
   await f.deck.playFolderItem('albums', f.song('B', 3));
-  await f.poll('B', 400, { paused: true, ended: false });
+  await f.poll('B', 400, { paused: true, ended: undefined });
   assert.deepEqual(f.commands.at(-1), { albumId: 'B', t: 0 });
   assert.deepEqual(f.queue(), ['B:0', 'B:1', 'B:2', 'B:3']);
 });
@@ -349,4 +361,155 @@ test('新页面加载期间短暂读取失败，不断开点歌所需的浏览�
   assert.deepEqual({ ...f.data.current }, { albumId: 'A', trackIndex: 1 });
   finish({ ok: true });
   assert.equal(await request, true);
+});
+
+for (const mode of ['one', 'album-loop', 'album-shuffle', 'all-loop', 'album-random', 'song-shuffle']) {
+  test(`${mode}：旧自动播放设置为 false，视频自然结束后仍接歌并实际播放`, async () => {
+    const f = fixture(mode);
+    f.data.settings.autoPlay = false;
+    await f.deck.playFolderItem('albums', f.song('B', 3));
+    await f.poll('B', 400, { paused: true, ended: true });
+    assert.equal(f.playRequests.at(-1), true);
+    assert.equal(f.browser.report.paused, false);
+    assert.equal(f.data.queue.source.id, 'albums');
+    if (['one', 'album-loop', 'album-shuffle'].includes(mode)) assert.equal(f.data.current.albumId, 'B');
+    if (mode === 'album-loop') assert.equal(f.data.current.trackIndex, 0);
+    if (mode === 'one') assert.equal(f.data.current.trackIndex, 3);
+  });
+}
+
+test('浏览器手动暂停在最后半秒且 ended=false，不自动跳歌或恢复播放', async () => {
+  const f = fixture('album-loop');
+  await f.deck.playAt('B', 3);
+  await f.poll('B', 399.8, { paused: true, ended: false });
+  assert.equal(f.commands.length, 1);
+  assert.equal(f.browser.report.paused, true);
+  assert.equal(f.data.current.trackIndex, 3);
+});
+
+test('播完即停：本曲结束后暂停，保留曲目和队列，不自动接歌', async () => {
+  const f = fixture('once');
+  await f.deck.playFolderItem('songs', f.song('A', 0));
+  assert.deepEqual(f.queue(), ['A:0']);
+  await f.poll('A', 100.2);
+  assert.equal(f.commands.length, 1);
+  assert.equal(f.browser.report.paused, true);
+  assert.equal(f.deck.snapshot().playing.trackIndex, 0);
+  await f.poll('A', 100.2, { paused: true });
+  assert.equal(f.commands.length, 1);
+  await f.deck.togglePlay();
+  assert.deepEqual(f.commands.at(-1), { albumId: 'A', t: 0 });
+  assert.equal(f.browser.report.paused, false);
+});
+
+test('播完即停：视频自然结束后不重播，网页抢先切集也不自动播放别的歌', async () => {
+  const f = fixture('once');
+  await f.deck.playAt('B', 3);
+  await f.poll('B', 399);
+  await f.poll('A', 0);
+  assert.equal(f.data.current.albumId, 'B');
+  assert.equal(f.data.current.trackIndex, 3);
+  assert.equal(f.browser.report.paused, true);
+  const count = f.commands.length;
+  await f.poll('B', 400, { paused: true, ended: true });
+  assert.equal(f.commands.length, count);
+});
+
+test('手动暂停后切换任意播放方式，都不会自动恢复播放', async () => {
+  const f = fixture('album-loop');
+  await f.deck.playAt('B', 1);
+  await f.deck.togglePlay();
+  for (const mode of f.deck.snapshot().playModes) {
+    f.deck.setPlayMode(mode.key);
+    assert.equal(f.browser.report.paused, true);
+    assert.equal(f.commands.length, 1);
+  }
+  await f.poll('B', 150, { paused: true });
+  assert.equal(f.commands.length, 1);
+});
+
+test('拖进度保持暂停或播放状态，手动暂停后历史进度纠正也不恢复播放', async () => {
+  const f = fixture('album-loop');
+  await f.deck.playAt('B', 1);
+  await f.deck.togglePlay();
+  await f.poll('B', 350, { paused: true }, 3000);
+  assert.equal(f.browser.report.paused, true);
+  assert.equal(f.playRequests.at(-1), false);
+  await f.deck.seekTo(150);
+  assert.equal(f.browser.report.paused, true);
+  await f.deck.togglePlay();
+  await f.deck.seekTo(160);
+  assert.equal(f.browser.report.paused, false);
+});
+
+test('手动暂停会覆盖同时返回的旧 ended 轮询', async () => {
+  const f = fixture('album-loop');
+  await f.deck.playAt('B', 3);
+  let finish;
+  f.browser.state = () => new Promise(resolve => { finish = resolve; });
+  const poll = f.poll('B', 400, { paused: true, ended: true });
+  f.browser.report = { ok: true, bvid: 'BV_B', t: 399.8, d: 400, paused: false, ended: false };
+  await f.deck.togglePlay();
+  finish({ ok: true, bvid: 'BV_B', t: 400, d: 400, paused: true, ended: true });
+  await poll;
+  assert.equal(f.commands.length, 1);
+  assert.equal(f.browser.report.paused, true);
+});
+
+test('播完即停：视频自然结束后保持本曲和暂停状态，按播放才重播', async () => {
+  const f = fixture('once');
+  await f.deck.playAt('B', 3);
+  await f.poll('B', 400, { paused: true, ended: true });
+  assert.equal(f.commands.length, 1);
+  assert.equal(f.deck.snapshot().playing.trackIndex, 3);
+  await f.poll('B', 400, { paused: true, ended: true });
+  assert.equal(f.commands.length, 1);
+  await f.deck.togglePlay();
+  assert.deepEqual(f.commands.at(-1), { albumId: 'B', t: 300 });
+  assert.equal(f.browser.report.paused, false);
+});
+
+test('播完即停的旧暂停请求返回时，不覆盖用户新点的歌曲', async () => {
+  const f = fixture('once');
+  await f.deck.playAt('A', 0);
+  const toggle = f.browser.togglePlay.bind(f.browser);
+  let finish;
+  f.browser.togglePlay = async force => {
+    const result = await toggle(force);
+    return new Promise(resolve => { finish = () => resolve(result); });
+  };
+  const end = f.poll('A', 100.2);
+  await new Promise(resolve => setImmediate(resolve));
+  await f.deck.playAt('B', 2);
+  finish();
+  await end;
+  const state = f.deck.snapshot();
+  assert.equal(state.playing.album.id, 'B');
+  assert.equal(state.playing.trackIndex, 2);
+  assert.equal(state.playing.paused, false);
+  assert.equal(f.browser.report.paused, false);
+});
+
+test('升级移除旧自动播放配置，保留曲库、播放方式和其他设置', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'albumdeck-settings-test-'));
+  const file = path.join(dir, 'album-deck.json');
+  try {
+    for (const autoPlay of [false, true]) {
+      const albums = [{ id: 'saved-album', bvid: 'BV_saved', tracks: [] }];
+      fs.writeFileSync(file, JSON.stringify({ albums, settings: { autoPlay, playMode: 'album-loop', skipHidden: false } }));
+      const store = new Store(dir);
+      assert.equal('autoPlay' in store.settings, false);
+      assert.deepEqual(store.albums, albums);
+      assert.equal(store.settings.playMode, 'album-loop');
+      assert.equal(store.settings.skipHidden, false);
+      store.patchSettings({ autoPlay: true, miniVisible: false });
+      const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
+      assert.equal('autoPlay' in saved.settings, false);
+      assert.equal(saved.settings.miniVisible, false);
+      assert.deepEqual(saved.albums, albums);
+    }
+  } finally {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+    fs.rmdirSync(dir);
+  }
 });

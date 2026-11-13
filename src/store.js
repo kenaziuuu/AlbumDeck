@@ -24,10 +24,10 @@ const defaultFolders = () => ([
 const DEFAULT_SETTINGS = {
   port: 9222,
   browserPath: '',
-  autoPlay: false,         // 切歌后自动播放：默认不勾选
   albumClickPlay: true,    // 点击资料库里的专辑时直接开始播放（关掉后只显示曲目，点播放才播）
   skipHidden: true,        // 隐藏的曲目播放时自动跳过
-  playMode: 'all-loop',    // 播放顺序：one / album-loop / album-shuffle / all-loop / album-random / song-shuffle
+  prefer360p: true,        // 优先独立切换 360P 视频流，保留音频选择
+  playMode: 'all-loop',    // 播放顺序：one / album-loop / album-shuffle / all-loop / album-random / song-shuffle / once
   miniVisible: true,
   miniStyle: 'full',       // 'full' 完整样式 / 'compact' 简洁长条 / 'vertical' MP3样式
   miniEdgeHide: true,      // 贴屏幕边缘自动隐藏
@@ -40,6 +40,9 @@ class Store {
   constructor(dir) {
     this.dir = dir;
     this.file = path.join(dir, 'album-deck.json');
+    this.revision = 0;
+    this.savedText = '';
+    this.saveTimer = null;
     this.data = {
       version: 1,
       albums: [],
@@ -56,7 +59,8 @@ class Store {
     try {
       if (!fs.existsSync(this.dir)) fs.mkdirSync(this.dir, { recursive: true });
       if (fs.existsSync(this.file)) {
-        const j = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+        this.savedText = fs.readFileSync(this.file, 'utf8');
+        const j = JSON.parse(this.savedText);
         this.data = {
           ...this.data, ...j,
           current: { ...this.data.current, ...(j.current || {}) },
@@ -66,6 +70,8 @@ class Store {
           }
         };
       }
+      // 自动接歌由播放方式统一控制，旧开关不再影响循环。
+      delete this.data.settings.autoPlay;
       // 旧配置升级：保证收藏夹结构与内置「喜欢」一定存在
       if (!Array.isArray(this.data.folders) || !this.data.folders.length) {
         this.data.folders = defaultFolders();
@@ -81,12 +87,26 @@ class Store {
   }
 
   save() {
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
     try {
+      const text = JSON.stringify(this.data, null, 2);
+      if (text === this.savedText) return true;
+      this.revision++;
       if (!fs.existsSync(this.dir)) fs.mkdirSync(this.dir, { recursive: true });
-      fs.writeFileSync(this.file, JSON.stringify(this.data, null, 2), 'utf8');
+      fs.writeFileSync(this.file, text, 'utf8');
+      this.savedText = text;
       return true;
     } catch (e) { console.error('保存配置失败:', e); return false; }
   }
+
+  /** 连续移动悬浮窗只保存最后的位置；重要曲库操作仍立即落盘。 */
+  scheduleSave() {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => { this.saveTimer = null; this.save(); }, 250);
+    this.saveTimer.unref?.();
+  }
+
+  flush() { if (this.saveTimer) this.save(); }
 
   get albums() { return this.data.albums; }
   set albums(v) { this.data.albums = v; this.save(); }
@@ -104,6 +124,7 @@ class Store {
       ...this.data.settings, ...obj,
       hotkeys: { ...this.data.settings.hotkeys, ...(obj.hotkeys || {}) }
     };
+    delete this.data.settings.autoPlay;
     this.save();
   }
 }

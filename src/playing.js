@@ -83,9 +83,12 @@ function stepBaseAlbumId({ albums, currentAlbumId, pin, playingBvid }) {
  * 这首是不是已经放完了（该自动下一首了）。
  * 注意 B 站视频放完会自动暂停 —— 只看「t 到曲尾」不够，还要认「视频已经停在末尾」，
  * 否则一张专辑（=一个视频）的最后一首放完永远等不到下一首。
- * @param {{track:object|null, t:number, d:number, paused:boolean}} arg
+ * @param {{track:object|null, t:number, d:number, paused:boolean, ended?:boolean, leadSeconds?:number}} arg
  */
-function isTrackEnded({ track, t, d, paused }) {
+function isTrackEnded({ track, t, d, paused, ended, leadSeconds = 0.5 }) {
+  if (ended === true) return true;
+  // 浏览器明确表示尚未结束时，暂停就是用户暂停，不能因接近曲尾而强行接歌。
+  if (paused && ended === false) return false;
   const cur = Number(t) || 0;
   const dur = Number(d) || 0;
   if (cur < 1) return false;
@@ -94,7 +97,7 @@ function isTrackEnded({ track, t, d, paused }) {
   if (!track || !(track.end > 0)) return false;
   // 整段视频的末曲等原生 ended / 末尾暂停信号，不把内部曲目边界的容差当作提前切歌。
   if (dur > 0 && track.end >= dur - 0.5) return false;
-  if (cur < track.end - 0.5) return false;
+  if (cur < track.end - leadSeconds) return false;
   // 到曲尾且视频还在放（同一张专辑里往后切）
   return !paused;
 }

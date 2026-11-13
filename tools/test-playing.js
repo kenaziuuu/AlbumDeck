@@ -70,6 +70,9 @@ const albums = [A, B];
   ok('没有曲目表 + 视频放完 → 结束', p.isTrackEnded({ track: null, t: 300, d: 300, paused: true }) === true);
   ok('视频最后半秒仍在播放 → 等待完整播完', p.isTrackEnded({ track: { start: 300, end: 400 }, t: 399.8, d: 400, paused: false }) === false);
   ok('末曲时间戳超过视频时长 → 也不提前截断视频', p.isTrackEnded({ track: { start: 300, end: 700 }, t: 599.8, d: 600, paused: false }) === false);
+  ok('明确尚未结束 + 手动暂停在末尾 → 不接歌', p.isTrackEnded({ track: tr, t: 599.8, d: 600, paused: true, ended: false }) === false);
+  ok('自然结束后网页重置进度 → 仍识别为结束', p.isTrackEnded({ track: tr, t: 0, d: 600, paused: true, ended: true }) === true);
+  ok('播完即停不提前半秒截断曲目', p.isTrackEnded({ track: tr, t: 399.8, d: 600, paused: false, ended: false, leadSeconds: 0 }) === false);
 }
 
 console.log(fail ? `\n${fail} 项失败` : '\n全部通过');

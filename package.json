@@ -1,6 +1,6 @@
 {
   "name": "album-deck",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "B 站长视频专辑的桌面播放控制器：时间戳点歌、切专辑、全局快捷键",
   "main": "src/main.js",
   "scripts": {
@@ -15,7 +15,11 @@
     "test:sort": "node tools/test-sort.js",
     "test:queue": "node --test tools/test-queue.js",
     "test:pause-cdp": "node tools/test-end-pause-cdp.js",
-    "test:all": "npm run test:geo && npm run test:playing && npm run test:follow && npm run test:sort && npm run test:reorder && npm run test:queue",
+    "test:quality": "node --test tools/test-quality.js",
+    "test:quality-live": "node tools/test-quality-bili.js",
+    "test:performance": "node --test tools/test-performance.js",
+    "bench:runtime": "node tools/bench.js",
+    "test:all": "npm run test:geo && npm run test:playing && npm run test:follow && npm run test:sort && npm run test:reorder && npm run test:queue && npm run test:quality && npm run test:performance",
     "test:ui": "node tools/selftest.js --deck-minitest",
     "test:folder": "node tools/selftest.js --deck-fqtest",
     "test:mini-toggle": "node tools/selftest.js --deck-summontest",

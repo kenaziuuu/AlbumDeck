@@ -3,9 +3,12 @@ const $ = s => document.querySelector(s);
 const fmt = s => window.deck.fmt(s);
 const LIKED_ID = 'fav_liked';
 let lastState = null;
+const decodeState = DeckState.createDecoder();
+let appliedStyle = '';
 
 /* 播放顺序图标（与主界面一致） */
 const MODE_ICONS = {
+  once: '<svg viewBox="0 0 24 24"><path d="M7 5v14M17 5v14"/></svg>',
   loop: '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.7M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-13.7 5.7M4 20v-5h5"/></svg>',
   shuffle: '<svg viewBox="0 0 24 24"><path d="M16 3h5v5"/><path d="M4 20L21 3"/><path d="M21 16v5h-5"/><path d="M15 15l6 6"/><path d="M4 4l5 5"/></svg>',
   one: '<svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 13.7-5.7M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-13.7 5.7M4 20v-5h5"/><text x="12" y="16.5" text-anchor="middle" font-size="9" fill="currentColor" stroke="none">1</text></svg>'
@@ -48,7 +51,7 @@ async function cycleMode() {
 }
 $('#mvMode').addEventListener('click', cycleMode);
 $('#mMode').addEventListener('click', cycleMode);
-/* 右键播放顺序：直接列出六种顺序，不用点很多次才轮到想要的 */
+/* 右键播放顺序：直接列出全部顺序，不用点很多次才轮到想要的 */
 ['#mMode', '#mvMode'].forEach(sel => {
   const el = $(sel);
   if (!el) return;
@@ -64,7 +67,7 @@ function renderModeBtn(el, key, label) {
   if (!el) return;
   if (el.dataset.k !== key) {
     el.dataset.k = key;
-    el.innerHTML = key === 'one' ? MODE_ICONS.one
+    el.innerHTML = key === 'once' ? MODE_ICONS.once : key === 'one' ? MODE_ICONS.one
       : (key.indexOf('shuffle') >= 0 || key === 'album-random' ? MODE_ICONS.shuffle : MODE_ICONS.loop);
   }
   el.title = `播放顺序：${label}（左键切换，右键直接选）`;
@@ -94,12 +97,16 @@ $('#mvHeart').addEventListener('click', toggleHeart);
 
 function applyStyle(style) {
   const s = style === 'compact' ? 'compact' : (style === 'vertical' ? 'vertical' : 'full');
+  if (s === appliedStyle) return;
+  appliedStyle = s;
   document.body.classList.toggle('style-compact', s === 'compact');
   document.body.classList.toggle('style-full', s === 'full');
   document.body.classList.toggle('style-vertical', s === 'vertical');
 }
 
-window.deck.onState(s => {
+function receiveState(packet) {
+  const s = decodeState(packet);
+  if (!s) return;
   lastState = s;
   applyStyle((s.settings && s.settings.miniStyle) || 'full');
 
@@ -166,6 +173,7 @@ window.deck.onState(s => {
   const modeMeta = modes.find(m => m.key === modeKey) || { label: '全专循环' };
   renderModeBtn($('#mMode'), modeKey, modeMeta.label);
   renderModeBtn($('#mvMode'), modeKey, modeMeta.label);
-});
+}
+window.deck.onState(receiveState);
 
-window.deck.state().catch(() => {});
+window.deck.state().then(receiveState).catch(() => {});

@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
+const policy = require('./package-policy');
 
 const root = path.resolve(__dirname, '..');
 const pkg = require('../package.json');
@@ -38,7 +39,15 @@ function copyDependencies(manifest, from, target, ancestors = new Set()) {
   }
 }
 
-function build() {
+function directorySize(dir) {
+  if (!fs.existsSync(dir)) return 0;
+  return fs.readdirSync(dir, { withFileTypes: true }).reduce((total, entry) => {
+    const file = path.join(dir, entry.name);
+    return total + (entry.isDirectory() ? directorySize(file) : fs.statSync(file).size);
+  }, 0);
+}
+
+async function build() {
   if (process.platform !== 'win32') throw new Error('请在 Windows 上生成 Windows 便携包');
   const runtime = path.join(root, 'node_modules', 'electron', 'dist');
   const runtimeExe = path.join(runtime, 'electron.exe');
@@ -51,6 +60,8 @@ function build() {
   const folder = withinDist(path.join(dist, name));
   const archive = withinDist(path.join(dist, name + '.zip'));
   const checksum = withinDist(archive + '.sha256');
+  const previousArchiveBytes = fs.existsSync(archive) ? fs.statSync(archive).size : 0;
+  const previousUnpackedBytes = directorySize(folder);
   fs.mkdirSync(dist, { recursive: true });
   for (const target of [folder, archive, checksum]) {
     if (!fs.existsSync(target)) continue;
@@ -59,8 +70,8 @@ function build() {
     fs.rmSync(withinDist(target), { recursive: true, force: true });
   }
 
-  console.log('复制完整 Electron 运行环境…');
-  fs.cpSync(runtime, folder, { recursive: true });
+  console.log('复制 Electron 运行环境，保留中英文语言资源及全部运行库…');
+  fs.cpSync(runtime, folder, { recursive: true, filter: file => policy.includeRuntime(path.relative(runtime, file)) });
   fs.renameSync(path.join(folder, 'electron.exe'), path.join(folder, 'AlbumDeck.exe'));
   if (fs.existsSync(path.join(folder, 'electron_wer.dll'))) {
     fs.renameSync(path.join(folder, 'electron_wer.dll'), path.join(folder, 'AlbumDeck_wer.dll'));
@@ -69,8 +80,13 @@ function build() {
   if (fs.existsSync(defaultApp)) fs.rmSync(defaultApp);
   const appDir = path.join(folder, 'resources', 'app');
   fs.mkdirSync(appDir, { recursive: true });
-  for (const dir of ['src', 'assets']) fs.cpSync(path.join(root, dir), path.join(appDir, dir), { recursive: true });
-  for (const file of ['README.md', 'RELEASE_NOTES.md', 'LICENSE']) fs.copyFileSync(path.join(root, file), path.join(appDir, file));
+  fs.cpSync(path.join(root, 'src'), path.join(appDir, 'src'), { recursive: true });
+  for (const file of policy.assets) {
+    const target = path.join(appDir, 'assets', file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(path.join(root, 'assets', file), target);
+  }
+  for (const file of ['RELEASE_NOTES.md', 'LICENSE']) fs.copyFileSync(path.join(root, file), path.join(appDir, file));
   const manifest = {
     name: pkg.name, version: pkg.version, description: pkg.description,
     main: pkg.main, license: pkg.license, dependencies: pkg.dependencies
@@ -92,13 +108,15 @@ function build() {
     if (['PATH', 'ELECTRON_RUN_AS_NODE'].includes(key.toUpperCase())) delete env[key];
   }
   env.PATH = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
-  const check = spawnSync(path.join(folder, 'AlbumDeck.exe'), ['--deck-packcheck'], {
-    cwd: folder, env, encoding: 'utf8', timeout: 30000, windowsHide: true
-  });
-  if (check.error || check.status !== 0 || !check.stdout.includes('PACK_CHECK_OK')) {
-    throw new Error('便携包启动验证失败：' + (check.error ? check.error.message : check.stderr + check.stdout));
+  for (const lang of ['zh-CN', 'en-US', 'fr']) {
+    const check = spawnSync(path.join(folder, 'AlbumDeck.exe'), ['--deck-packcheck', '--lang=' + lang], {
+      cwd: folder, env, encoding: 'utf8', timeout: 30000, windowsHide: true
+    });
+    if (check.error || check.status !== 0 || !check.stdout.includes('PACK_CHECK_OK')) {
+      throw new Error(`便携包启动验证失败 (${lang})：` + (check.error ? check.error.message : check.stderr + check.stdout));
+    }
+    console.log(lang + ': ' + check.stdout.trim());
   }
-  console.log(check.stdout.trim());
   console.log('压缩 Windows 便携包…');
   const zipped = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
     '$ErrorActionPreference = "Stop"; Compress-Archive -LiteralPath $env:ALBUMDECK_PACK_DIR -DestinationPath $env:ALBUMDECK_PACK_ZIP -CompressionLevel Optimal'], {
@@ -106,11 +124,16 @@ function build() {
     encoding: 'utf8', windowsHide: true
   });
   if (zipped.error || zipped.status !== 0) throw new Error('压缩失败：' + (zipped.error ? zipped.error.message : zipped.stderr));
-  const hash = crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
-  fs.writeFileSync(checksum, `${hash}  ${path.basename(archive)}\n`);
+  const hash = crypto.createHash('sha256');
+  for await (const chunk of fs.createReadStream(archive)) hash.update(chunk);
+  fs.writeFileSync(checksum, `${hash.digest('hex')}  ${path.basename(archive)}\n`);
+  const report = { archive: path.basename(archive), archiveBytes: fs.statSync(archive).size,
+    unpackedBytes: directorySize(folder), previousArchiveBytes, previousUnpackedBytes,
+    locales: [...policy.locales] };
+  fs.writeFileSync(withinDist(path.join(dist, 'pack-report.json')), JSON.stringify(report, null, 2) + '\n');
+  console.log('体积报告：' + JSON.stringify(report));
   console.log(`完成：${archive} (${(fs.statSync(archive).size / 1024 / 1024).toFixed(1)} MB)`);
   console.log('请将 ZIP 上传到 GitHub Release 的附件，不要把 dist 或 node_modules 提交到源码仓库。');
 }
 
-try { build(); }
-catch (error) { console.error(error.message); process.exitCode = 1; }
+build().catch(error => { console.error(error.message); process.exitCode = 1; });

@@ -6,6 +6,7 @@ tools/*-test.json
 tools/*.log
 tools/shot.png
 tools/*.tmp
+tools/perf-*.json
 
 # 打包产物
 dist/

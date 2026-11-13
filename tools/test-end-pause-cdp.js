@@ -56,8 +56,24 @@ const server = http.createServer((req, res) => {
     </div>
     <script>
       window.settingChanges = 0;
+      const video = document.querySelector('video');
+      window.nativePlayCalls = 0;
+      window.player = {
+        seek: t => { video.currentTime = t; },
+        play: () => { window.nativePlayCalls++; return video.play(); },
+        pause: () => video.pause()
+      };
+      let finished = false;
+      video.addEventListener('seeked', () => {
+        if (finished && window.simulateLateEndPause) {
+          finished = false;
+          setTimeout(() => video.pause(), 650);
+        }
+      });
+      document.addEventListener('keydown', e => { if (e.key === ' ') video.pause(); });
       document.querySelector('[value="2"]').addEventListener('change', () => window.settingChanges++);
       document.querySelector('video').addEventListener('ended', () => {
+        finished = true;
         if (!document.querySelector('[value="2"]').checked) location.href = '/video/${B}/';
       });
     </script>`);
@@ -72,6 +88,7 @@ function loadDeck(browser) {
   };
   const store = {
     data, save() {}, patch(patch) { Object.assign(data, patch); },
+    patchSettings(patch) { Object.assign(data.settings, patch); },
     get albums() { return data.albums; }, get current() { return data.current; },
     get folders() { return data.folders; }, get settings() { return data.settings; }
   };
@@ -84,7 +101,7 @@ function loadDeck(browser) {
   });
   vm.runInContext(fs.readFileSync(mainPath, 'utf8') + `
     store = testStore; cdp = testBrowser;
-    globalThis.deck = { playAt, pollOnce, snapshot };
+    globalThis.deck = { playAt, pollOnce, snapshot, setPlayMode, togglePlay, seekTo };
   `, context, { filename: mainPath });
   return context.deck;
 }
@@ -178,7 +195,8 @@ let child, controller;
   await waitFor(() => controller.state(), s => s && s.t >= 20);
   await deck.pollOnce();
   const corrected = await controller.state();
-  assert.equal(corrected.t, 5);
+  assert.ok(corrected.t >= 5 && corrected.t < 6);
+  assert.equal(corrected.paused, false);
   assert.equal(deck.snapshot().current.trackIndex, 1);
   assert.equal(deck.snapshot().queue.pos, 1);
   console.log('PASS 真实浏览器延迟恢复到第 4 首后，应用纠正回所点第 2 首');
@@ -189,10 +207,74 @@ let child, controller;
   await first;
   const latest = await controller.state();
   assert.equal(latest.bvid, A);
-  assert.equal(latest.t, 10);
+  assert.ok(latest.t >= 10 && latest.t < 11);
+  assert.equal(latest.paused, false);
   assert.equal(deck.snapshot().playing.album.id, A);
   assert.equal(deck.snapshot().current.trackIndex, 2);
   console.log('PASS 连续跨专辑点歌：旧导航请求取消，最后点选的专辑和歌曲生效');
+
+  await deck.playAt(A, 3);
+  await deck.seekTo(29.7);
+  await waitFor(() => controller.state(), s => s && s.ended && s.paused);
+  const manual = deck.playAt(A, 1);
+  await waitFor(() => controller.state(), s => s && s.t >= 5 && s.t < 7 && !s.paused);
+  await controller.send('Input.dispatchKeyEvent', { type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32 });
+  assert.equal(await manual, true);
+  const manuallyPaused = await controller.state();
+  assert.equal(manuallyPaused.paused, true);
+  assert.ok(manuallyPaused.userAction > 0);
+  assert.equal(deck.snapshot().playing.paused, true);
+  await sleep(900);
+  await deck.pollOnce();
+  assert.equal((await controller.state()).paused, true);
+  console.log('PASS 续播确认期间用户在网页按暂停，不重试播放或覆盖暂停状态');
+
+  await controller.evaluate('window.simulateLateEndPause = true; true');
+  await deck.playAt(A, 3);
+  await deck.seekTo(29.7);
+  await waitFor(() => controller.state(), s => s && s.ended && s.paused);
+  await sleep(1600);
+  await deck.pollOnce();
+  await sleep(900);
+  const looped = await controller.state();
+  assert.equal(looped.bvid, A);
+  assert.ok(looped.t < 3);
+  assert.equal(looped.paused, false);
+  assert.equal(deck.snapshot().current.trackIndex, 0);
+  console.log('PASS 网页在跳回第一首 650 毫秒后再次暂停，专内循环仍恢复并持续播放');
+  assert.ok(await controller.evaluate('window.nativePlayCalls') > 0);
+  await controller.evaluate('window.simulateLateEndPause = false; true');
+
+  await deck.playAt(A, 3);
+  await deck.seekTo(29.55);
+  await deck.togglePlay();
+  await sleep(1600);
+  await deck.pollOnce();
+  assert.equal((await controller.state()).paused, true);
+  assert.equal(deck.snapshot().current.trackIndex, 3);
+  deck.setPlayMode('song-shuffle');
+  await deck.pollOnce();
+  assert.equal((await controller.state()).paused, true);
+  console.log('PASS 手动暂停在视频末尾、再切换随机方式，仍保持暂停');
+
+  deck.setPlayMode('once');
+  await deck.playAt(A, 1);
+  await deck.seekTo(9.7);
+  await sleep(1800);
+  await deck.pollOnce();
+  const stopped = await controller.state();
+  assert.equal(stopped.paused, true);
+  assert.equal(deck.snapshot().current.trackIndex, 1);
+  assert.equal(deck.snapshot().playing.trackIndex, 1);
+  await sleep(300);
+  await deck.pollOnce();
+  assert.equal((await controller.state()).paused, true);
+  console.log('PASS 播完即停在本曲结束后暂停，不接下一首且保留本曲标题');
+  await deck.togglePlay();
+  const replayed = await controller.state();
+  assert.ok(replayed.t >= 5 && replayed.t < 6);
+  assert.equal(replayed.paused, false);
+  console.log('PASS 播完即停后再次按播放，从本曲起点重播');
 })().catch(e => { console.error(e); process.exitCode = 1; }).finally(() => {
   if (controller) controller.disconnect();
   if (child && child.pid) spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
