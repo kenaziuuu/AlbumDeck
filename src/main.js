@@ -34,6 +34,11 @@ if (SELF_TEST) {
       fs.copyFileSync(path.join(app.getPath('appData'), 'album-deck', 'album-deck.json'), path.join(_dir, 'album-deck.json'));
     } catch (e) { console.log('REPRO COPY FAILED:', e.message); }
   }
+} else if (app.isPackaged) {
+  // 安装版有独立的显示名称，仍与旧版共用同一个曲库、收藏夹和浏览器配置目录。
+  const userData = path.join(app.getPath('appData'), 'album-deck');
+  fs.mkdirSync(userData, { recursive: true });
+  app.setPath('userData', userData);
 }
 
 /* ---------------- 全局状态 ---------------- */
@@ -141,7 +146,7 @@ function snapshot() {
     conn: { ...conn },
     settings: settings(),
     dataRevision: store.revision || 0,
-    playModes: PLAY_MODES,
+    playModes: modesForFolder(activeQueueFolder()),
     message: Date.now() - messageAt < 6000 ? message : '',
     importBusy
   };
@@ -192,7 +197,7 @@ async function playFolderItem(folderId, item) {
   }
   const items = folderQueueItems(f, target || queueCurrent());
   if (!items.length) { setMessage('这个收藏夹里的歌都不在曲库里'); return false; }
-  const mode = settings().playMode || 'all-loop';
+  const mode = playModeForFolder(f);
   if (mode === 'album-shuffle' || mode === 'song-shuffle' || mode === 'album-random') shuffleArr(items);
   let pos = target ? items.findIndex(it => it.albumId === target.albumId && it.trackIndex === target.trackIndex) : -1;
   if (pos < 0) pos = 0;
@@ -219,7 +224,7 @@ async function playAt(albumId, index, opts = {}) {
   store.patch({ current: { albumId, trackIndex: i } });
   // 从收藏夹队列里跳出去播别的专辑 → 退出收藏夹队列，回到整库队列
   const q0 = store.data.queue;
-  if (q0 && q0.source && !(q0.items || []).some(it => it.albumId === albumId && it.trackIndex === i)) {
+  if (q0 && q0.source && (opts.fromLibrary || !(q0.items || []).some(it => it.albumId === albumId && it.trackIndex === i))) {
     store.data.queue = { ...q0, source: null };
     rebuildQueue();
   }
@@ -284,6 +289,20 @@ const PLAY_MODES = [
   { key: 'once', label: '播完即停', short: '播完即停', scope: '单曲', endAction: 'pause' }
 ];
 
+const SONG_FOLDER_MODES = [
+  { key: 'one', label: '单曲循环', short: '单曲循环', scope: '收藏夹', endAction: 'repeat' },
+  { key: 'all-loop', label: '列表循环', short: '列表循环', scope: '收藏夹', endAction: 'next' },
+  { key: 'song-shuffle', label: '随机播放', short: '随机播放', scope: '收藏夹', endAction: 'next' }
+];
+
+function modesForFolder(folder) {
+  return folder?.type === 'song' ? SONG_FOLDER_MODES : PLAY_MODES;
+}
+
+function playModeForFolder(folder) {
+  return (folder?.type === 'song' ? settings().songFolderPlayMode : settings().playMode) || 'all-loop';
+}
+
 function shuffleArr(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -321,7 +340,7 @@ function folderQueueItems(f, cur = queueCurrent()) {
     if (idx < 0) idx = 0;
     items.push({ albumId: a.id, trackIndex: idx });
   }
-  const mode = settings().playMode || 'all-loop';
+  const mode = playModeForFolder(f);
   if (mode === 'once') {
     const target = items.find(it => it.albumId === cur.albumId && it.trackIndex === cur.trackIndex) || items[0];
     return target ? [target] : [];
@@ -338,6 +357,11 @@ function folderQueueItems(f, cur = queueCurrent()) {
 function folderQueueSource() {
   const q = store.data.queue;
   return q && q.source && q.source.kind === 'folder' ? q.source : null;
+}
+
+function activeQueueFolder() {
+  const source = folderQueueSource();
+  return source ? folderById(source.id) : null;
 }
 
 /** 退出收藏夹队列，回到按播放顺序的整库队列 */
@@ -359,7 +383,6 @@ function syncFolderQueue(folderId) {
 }
 
 function rebuildQueue() {
-  const mode = settings().playMode || 'all-loop';
   const cur = queueCurrent();
   // 收藏夹队列：曲库/收藏夹变了就按收藏夹重新生成，别退回整库顺序
   const src = folderQueueSource();
@@ -367,6 +390,7 @@ function rebuildQueue() {
     const f = folderById(src.id);
     const fitems = f ? folderQueueItems(f, cur) : [];
     if (fitems.length) {
+      const mode = playModeForFolder(f);
       if (mode === 'album-shuffle' || mode === 'song-shuffle' || mode === 'album-random') shuffleArr(fitems);
       const q0 = store.data.queue;
       let pos = fitems.findIndex(it => it.albumId === cur.albumId && it.trackIndex === cur.trackIndex);
@@ -376,8 +400,9 @@ function rebuildQueue() {
       return store.data.queue;
     }
     // 收藏夹没了 / 里面没歌了 → 退回整库队列
-    store.data.queue = { ...(store.data.queue || {}), mode, source: null };
+    store.data.queue = { ...(store.data.queue || {}), source: null };
   }
+  const mode = playModeForFolder(null);
   const curAlbum = albums().find(a => a.id === cur.albumId) || albums()[0];
   const items = [];
   if (curAlbum) {
@@ -408,14 +433,13 @@ function rebuildQueue() {
 }
 
 function ensureQueue() {
-  const mode = settings().playMode || 'all-loop';
   const q = store.data.queue;
   // 收藏夹队列也要检查播放模式，专内模式只保留当前专辑。
   const src = folderQueueSource();
   if (src) {
     const f = folderById(src.id);
     if (f && Array.isArray(q.items) && q.items.length) {
-      if (q.mode !== mode) return rebuildQueue();
+      if (q.mode !== playModeForFolder(f)) return rebuildQueue();
       // 收藏夹内容变了（增删歌）→ 重新生成一次，保证和收藏夹一致
       const fresh = folderQueueItems(f);
       const same = fresh.length === q.items.length &&
@@ -426,6 +450,7 @@ function ensureQueue() {
     return rebuildQueue();
   }
   // 手动选中某张专辑但还没播时，队列仍按"正在播的那张"算，别被选中项带偏
+  const mode = playModeForFolder(null);
   const cur = queueCurrent();
   const albumScope = mode === 'one' || mode === 'once' || mode === 'album-loop' || mode === 'album-shuffle';
   const need = !q || !Array.isArray(q.items) || !q.items.length || q.mode !== mode ||
@@ -443,9 +468,13 @@ function syncQueuePos() {
 
 function refreshQueue() { rebuildQueue(); syncQueuePos(); }
 
-function setPlayMode(mode) {
-  if (!PLAY_MODES.some(m => m.key === mode)) throw new Error('未知的播放顺序');
-  store.patchSettings({ playMode: mode });
+function setPlayMode(mode, sourceId) {
+  const folder = activeQueueFolder();
+  if (sourceId !== undefined && sourceId !== (folder?.id ?? null)) throw new Error('播放列表已切换，请重新选择');
+  if (!modesForFolder(folder).some(m => m.key === mode)) throw new Error('当前播放列表不支持此播放顺序');
+  const key = folder?.type === 'song' ? 'songFolderPlayMode' : 'playMode';
+  if (settings()[key] === mode) return mode;
+  store.patchSettings({ [key]: mode });
   rebuildQueue(); syncQueuePos();
   broadcast();
   return mode;
@@ -453,8 +482,9 @@ function setPlayMode(mode) {
 
 /** 自然曲尾只执行该模式定义的动作，不能把网页结束暂停当作手动暂停。 */
 async function finishTrack(restore = false) {
-  const mode = PLAY_MODES.find(m => m.key === settings().playMode);
-  if (!mode || mode.endAction !== 'pause') return nextTrack();
+  const folder = activeQueueFolder();
+  const mode = modesForFolder(folder).find(m => m.key === playModeForFolder(folder));
+  if (mode?.endAction !== 'pause') return nextTrack();
   const item = queueCurrent();
   const target = { albumId: item.albumId, trackIndex: item.trackIndex };
   manualPause = true;
@@ -475,8 +505,8 @@ async function finishTrack(restore = false) {
 }
 
 function nextTrack() {
-  const mode = settings().playMode || 'all-loop';
   let q = ensureQueue();
+  const mode = q.mode;
   if (!q.items.length) return;
   if (mode === 'one') { const it = q.items[q.pos]; return playAt(it.albumId, it.trackIndex); }
   const skip = settings().skipHidden;
@@ -498,8 +528,8 @@ function nextTrack() {
 }
 
 function prevTrack() {
-  const mode = settings().playMode || 'all-loop';
   const q = ensureQueue();
+  const mode = q.mode;
   if (!q.items.length) return;
   if (mode === 'one') { const it = q.items[q.pos]; return playAt(it.albumId, it.trackIndex); }
   const skip = settings().skipHidden;
@@ -737,7 +767,7 @@ async function pollOnce() {
       ? byBv.tracks[queued.trackIndex] : null;
     const playTr = queuedTrack || (byBv && byBv.tracks && byBv.tracks[playing.trackIndexAt(byBv, s.t)]);
     const endedNow = playing.isTrackEnded({ track: playTr, t: s.t, d: s.d, paused: s.paused, ended: s.ended,
-      leadSeconds: settings().playMode === 'once' ? 0 : 0.5 });
+      leadSeconds: q?.mode === 'once' ? 0 : 0.5 });
     // video.ended 也覆盖视频结束后暂停、进度被页面重置的情况。
     if (byBv && endedNow) {
       if (!manualPause && Date.now() - lastAdvance > 2500) {
@@ -1260,13 +1290,13 @@ function registerIpc() {
   h('conn:launch', async () => { await launchBrowser(); return snapshot(); });
   h('conn:browserPath', () => findBrowser() || '');
 
-  h('play:at', async ({ albumId, index }) => playAt(albumId, index));
+  h('play:at', async ({ albumId, index, fromLibrary }) => playAt(albumId, index, { fromLibrary }));
   h('play:select', ({ albumId }) => selectAlbum(albumId));
   h('play:next', async () => stepTrack(1));
   h('play:prev', async () => stepTrack(-1));
   h('play:albumNext', async () => stepAlbum(1));
   h('play:albumPrev', async () => stepAlbum(-1));
-  h('play:setMode', mode => setPlayMode(mode));
+  h('play:setMode', ({ mode, sourceId }) => setPlayMode(mode, sourceId));
   h('play:toggle', async () => togglePlay());
   h('play:replay', async () => replay());
   h('play:seek', async ({ seconds }) => seekTo(seconds));
@@ -1633,7 +1663,7 @@ function registerIpc() {
     if (patch.pollMs) startPolling();
     if (patch.browserPath) cdp.browser = undefined;
     if (patch.miniStyle) applyMiniStyle();
-    if (patch.playMode) { rebuildQueue(); syncQueuePos(); }
+    if (patch.playMode || patch.songFolderPlayMode) ensureQueue();
     if (patch.miniEdgeHide === false && miniCollapsed) expandMini();
     if (patch.miniVisible === true && miniIsHidden()) summonMini();
     if (patch.miniVisible === false && miniWin && !miniWin.isDestroyed() && miniWin.isVisible()) { miniCollapsed = false; miniWin.hide(); }
@@ -2446,6 +2476,7 @@ if (!gotLock) {
               }
               out.ui.afterCollapse = document.querySelectorAll('#qpList .qp-group.open').length;
               document.querySelector('#btnPlayMode').click();
+              document.querySelector('#popMenu [data-pm=once]').click();
               await wait(500);
               const s3 = await window.deck.state();
               out.ui.afterModeClick = s3.settings.playMode;

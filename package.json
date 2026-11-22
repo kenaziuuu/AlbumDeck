@@ -1,11 +1,12 @@
 {
   "name": "album-deck",
-  "version": "0.16.0",
+  "version": "0.20.0",
   "description": "B 站长视频专辑的桌面播放控制器：时间戳点歌、切专辑、全局快捷键",
   "main": "src/main.js",
   "scripts": {
     "start": "node tools/launch.js",
     "pack:win": "node tools/pack-win.js",
+    "pack:installer": "node tools/pack-installer.js",
     "test:api": "node tools/test-import.js",
     "test:cdp": "node tools/test-cdp.js",
     "test:geo": "node tools/test-geometry.js",
@@ -18,8 +19,9 @@
     "test:quality": "node --test tools/test-quality.js",
     "test:quality-live": "node tools/test-quality-bili.js",
     "test:performance": "node --test tools/test-performance.js",
+    "test:tracklist": "node --test tools/test-tracklist.js",
     "bench:runtime": "node tools/bench.js",
-    "test:all": "npm run test:geo && npm run test:playing && npm run test:follow && npm run test:sort && npm run test:reorder && npm run test:queue && npm run test:quality && npm run test:performance",
+    "test:all": "npm run test:geo && npm run test:playing && npm run test:follow && npm run test:sort && npm run test:reorder && npm run test:queue && npm run test:quality && npm run test:performance && npm run test:tracklist",
     "test:ui": "node tools/selftest.js --deck-minitest",
     "test:folder": "node tools/selftest.js --deck-fqtest",
     "test:mini-toggle": "node tools/selftest.js --deck-summontest",
@@ -39,6 +41,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "electron": "^37.2.0"
+    "electron": "^37.2.0",
+    "electron-builder": "26.18.1"
   }
 }

@@ -28,6 +28,9 @@ const DEFAULT_SETTINGS = {
   skipHidden: true,        // 隐藏的曲目播放时自动跳过
   prefer360p: true,        // 优先独立切换 360P 视频流，保留音频选择
   playMode: 'all-loop',    // 播放顺序：one / album-loop / album-shuffle / all-loop / album-random / song-shuffle / once
+  songFolderPlayMode: 'all-loop',
+  startupView: 'library',
+  startupFolderId: LIKED_ID,
   miniVisible: true,
   miniStyle: 'full',       // 'full' 完整样式 / 'compact' 简洁长条 / 'vertical' MP3样式
   miniEdgeHide: true,      // 贴屏幕边缘自动隐藏
@@ -69,6 +72,11 @@ class Store {
             hotkeys: { ...DEFAULT_HOTKEYS, ...((j.settings || {}).hotkeys || {}) }
           }
         };
+        if (!['one', 'all-loop', 'song-shuffle'].includes(j.settings?.songFolderPlayMode)) {
+          const oldMode = this.data.settings.playMode;
+          this.data.settings.songFolderPlayMode = oldMode === 'one' ? 'one'
+            : ['album-shuffle', 'album-random', 'song-shuffle'].includes(oldMode) ? 'song-shuffle' : 'all-loop';
+        }
       }
       // 自动接歌由播放方式统一控制，旧开关不再影响循环。
       delete this.data.settings.autoPlay;

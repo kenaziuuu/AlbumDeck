@@ -17,8 +17,8 @@ echo [AlbumDeck] Missing Electron runtime or application dependencies.
 echo.
 echo This is a source package, not a ready-to-run Windows package.
 echo.
-echo Recommended: download the Windows portable ZIP from Releases,
-echo extract the ENTIRE ZIP, then run AlbumDeck.exe or start.bat.
+echo Recommended: download the Windows setup EXE from Releases
+echo and double-click it to install AlbumDeck.
 echo https://github.com/kenaziuuu/AlbumDeck/releases/latest
 echo.
 echo To run this source package: install Node.js LTS, then run:

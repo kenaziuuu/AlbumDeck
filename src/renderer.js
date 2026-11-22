@@ -22,6 +22,7 @@ let sortAlbums = false, albumDragFrom = -1;
 const LIKED_ID = 'fav_liked';
 let viewMode = 'library';                 // 'library' | 'folder'
 let activeFolderId = LIKED_ID;
+let initializedView = false;
 let popItem = null, popFolder = null, popAction = null, popAnchor = null, popShownAt = 0;
 let folderModalMode = 'create', folderModalType = 'song', folderEditingId = null, pendingAddItem = null;
 let pendingImportFolder = false;   // 新建收藏夹是为了「导入到收藏夹」时置位
@@ -253,9 +254,11 @@ function renderNow() {
   $('#btnLikeNow').style.display = (a && t) ? '' : 'none';
   $('#btnFavNow').style.display = (a && t) ? '' : 'none';
   $('#btnLikeNow').classList.toggle('on', lk);
-  $('#btnLikeNow').textContent = lk ? '♥ 已红心' : '♡ 红心';
+  $('#btnLikeNow').textContent = lk ? '♥' : '♡';
+  $('#btnLikeNow').title = lk ? '从「喜欢」移除' : '加入「喜欢」';
+  $('#btnLikeNow').setAttribute('aria-pressed', String(lk));
   $('#btnFavNow').classList.toggle('on', faved);
-  $('#btnFavNow').textContent = faved ? '★ 已收藏' : '☆ 收藏';
+  $('#btnFavNow').textContent = faved ? '★' : '☆';
 }
 
 /* ── 调整顺序（拖拽） ── */
@@ -402,8 +405,7 @@ async function jumpToAlbum(a) {
   $('#albumSearch').value = '';        // 清掉过滤词，保证目标专辑一定可见
   sideSig = ''; listSig = '';
   render();                            // 先切视图，点击后立刻有反馈
-  if (S.settings.albumClickPlay === false) await window.deck.selectAlbum(a.id);
-  else await window.deck.playAt(a.id, 0);
+  await window.deck.selectAlbum(a.id);
   render();
   ensureActiveVisible();
   toast(`已跳转到「${a.title}」的曲目列表`);
@@ -435,14 +437,15 @@ const MODE_ICONS = {
 
 function renderPlayMode() {
   const modes = S.playModes || [];
-  const key = S.settings.playMode || 'all-loop';
+  const key = S.queue?.mode || 'all-loop';
+  const source = S.queue?.source;
   const meta = modes.find(m => m.key === key) || { short: '全专循环', scope: '全库', label: '全专循环播放' };
   const icon = key === 'once' ? MODE_ICONS.once : key === 'one' ? MODE_ICONS.one
     : (key.indexOf('shuffle') >= 0 || key === 'album-random' ? MODE_ICONS.shuffle : MODE_ICONS.loop);
   const btn = $('#btnPlayMode');
-  const html = `${icon}<span>${esc(meta.short)}</span><span class="mscope">${esc(meta.scope)}</span>`;
+  const html = `${icon}<span>${esc(meta.short)}</span><span class="mscope">${esc(source?.name || meta.scope)}</span>`;
   if (btn.dataset.html !== html) { btn.dataset.html = html; btn.innerHTML = html; }
-  btn.title = `当前：${meta.label}（点一下切换）`;
+  btn.title = source ? `${source.name} · ${meta.label}（点击选择播放顺序）` : `${meta.label}（点击选择播放顺序）`;
 }
 
 function renderQueue() {
@@ -459,7 +462,7 @@ function renderQueue() {
   const meta = (S.playModes || []).find(m => m.key === q.mode);
   $('#qpCount').textContent = items.length ? `${items.length} 首` : '';
   $('#qpMode').textContent = src
-    ? `收藏夹「${src.name}」 · 点此回到整库列表`
+    ? `收藏夹「${src.name}」 · ${meta?.label || ''} · 点此回到整库列表`
     : (meta ? `播放顺序：${meta.label}` : '');
   $('#qpMode').classList.toggle('from-folder', !!src);
   $('#qpMode').title = src ? `当前播放列表来自收藏夹「${src.name}」` : '';
@@ -564,28 +567,20 @@ $('#btnNext').addEventListener('click', () => window.deck.next());
 $('#btnPrevAlbum').addEventListener('click', () => window.deck.prevAlbum());
 $('#btnNextAlbum').addEventListener('click', () => window.deck.nextAlbum());
 $('#btnPlay').addEventListener('click', () => window.deck.togglePlay());
-/* 播放顺序：点一下换下一种 */
-/* 播放顺序：点一下换下一种，右键直接列出全部方式 */
-$('#btnPlayMode').addEventListener('contextmenu', e => {
+function openPlayModeMenu(e) {
   e.preventDefault();
-  const cur = S.settings.playMode || 'all-loop';
-  showPop(e.currentTarget, `<div class="pop-head">播放顺序</div>` + (S.playModes || []).map(m =>
-    `<button class="pop-item${m.key === cur ? ' on' : ''}" data-pm="${esc(m.key)}">
-      <span class="pi-ico">${m.key === cur ? '✓' : ' '}</span>${esc(m.label)}
-      <span class="pi-count">${esc(m.scope)}</span></button>`).join(''));
-});
-$('#btnPlayMode').addEventListener('click', async () => {
   const modes = S.playModes || [];
   if (!modes.length) return;
-  const cur = S.settings.playMode || 'all-loop';
-  const i = modes.findIndex(m => m.key === cur);
-  const next = modes[(i + 1) % modes.length];
-  try {
-    await window.deck.setPlayMode(next.key);
-    queueSig = '';
-    toast(`播放顺序：${next.label}`);
-  } catch (e) { toast('切换失败：' + e.message); }
-});
+  const cur = S.queue?.mode || 'all-loop';
+  const source = S.queue?.source;
+  showPop(e.currentTarget, `<div class="pop-head">播放顺序${source ? ' · ' + esc(source.name) : ''}</div>` + modes.map(m =>
+    `<button class="pop-item${m.key === cur ? ' on' : ''}" data-pm="${esc(m.key)}">
+      <span class="pi-ico">${m.key === cur ? '✓' : ' '}</span>${esc(m.label)}
+      <span class="pi-count">${esc(source && m.scope === '全库' ? '收藏夹' : m.scope)}</span></button>`).join(''));
+  $('#popMenu').dataset.modeSource = source?.id || '';
+}
+$('#btnPlayMode').addEventListener('click', openPlayModeMenu);
+$('#btnPlayMode').addEventListener('contextmenu', openPlayModeMenu);
 
 /* 播放列表抽屉 */
 $('#btnQueue').addEventListener('click', () => {
@@ -837,7 +832,7 @@ $('#albumList').addEventListener('click', e => {
   if (el) {
     // 设置里关掉「点击专辑直接播放」时，只切过去显示曲目列表
     if (S.settings.albumClickPlay === false) window.deck.selectAlbum(el.dataset.id);
-    else window.deck.playAt(el.dataset.id, 0);
+    else window.deck.playAt(el.dataset.id, 0, true);
   }
 });
 /** 某一项（收藏夹里的项 / 资料库里的专辑或曲目）的右键菜单：看来源 / 复制链接 / 重新导入 */
@@ -981,7 +976,7 @@ $('#trackList').addEventListener('click', async e => {
   if (!row) return;
   if (viewMode === 'library') {
     if (!a) return;
-    window.deck.playAt(a.id, Number(row.dataset.i));
+    window.deck.playAt(a.id, Number(row.dataset.i), true);
   } else {
     const f = activeFolder();
     const it = f && (f.items || []).find(x => x.key === row.dataset.fkey);
@@ -1087,32 +1082,39 @@ $('#btnAddPaste').addEventListener('click', async () => {
   const text = $('#pText').value.trim();
   let info = null;
   try { info = await window.deck.videoInfo(bvid); } catch (_) {}
-  const duration = (info && info.duration) || 0;
+  let duration = (info && info.duration) || 0;
 
   let tracks = text ? await window.deck.parseText(text, duration) : [];
-  let fallback = false;
+  let tracksSource;
   if (!tracks.length) {
-    // 没粘贴时间戳时，先试视频自带章节
+    // 只填链接时复用批量导入的曲目识别。手动时间戳仍优先。
     try {
-      const chapters = await window.deck.chapters(bvid);
-      if (chapters.length) tracks = chapters;
-    } catch (_) { /* 忽略，继续兜底 */ }
+      const [found] = await window.deck.build([info || { bvid }]);
+      if (found?.tracks?.length) {
+        tracks = found.tracks;
+        tracksSource = found.tracksSource;
+        duration = found.duration;
+        info ||= found;
+      }
+    } catch (e) {
+      toast('读取曲目失败：' + e.message);
+      return;
+    }
   }
   if (!tracks.length) {
-    // 再没有就整段视频当一首单曲，名字用视频标题
     tracks = [{ name: cleanTrackTitle(info && info.title), start: 0, end: duration }];
-    fallback = true;
+    tracksSource = 'single';
   }
 
   const album = {
     id: 'a_' + Date.now().toString(36),
     title: $('#pTitle').value.trim() || autoTitle(info && info.title) || bvid,
     bvid, aid: info && info.aid, duration, pic: info && info.pic,
-    tracks, tracksOk: true
+    tracks, tracksSource, tracksOk: true
   };
   const r = await window.deck.addAlbums([album]);
   toast(r.added
-    ? `已添加「${album.title}」· ${tracks.length} 首${fallback ? '（整段单曲）' : ''}`
+    ? `已添加「${album.title}」· ${tracks.length} 首${tracksSource === 'single' ? '（整段单曲）' : ''}`
     : '这张专辑已经在曲库里了');
   closeModal('importModal');
   $('#pText').value = ''; $('#pPreview').innerHTML = ''; $('#parseInfo').textContent = '';
@@ -1191,7 +1193,7 @@ function setCandidates(list) {
   if ($('#btnBuildFav')) $('#btnBuildFav').disabled = !candidates.length;
   $('#buildHint').textContent = candidates.length > 60
     ? `共 ${candidates.length} 个视频，先用上面的过滤框筛选再勾选（例如输入「孙燕姿」）`
-    : '勾选视频后，会自动读取置顶评论里的曲目时间戳';
+    : '勾选后自动识别评论、楼中楼、简介和视频章节中的曲目';
 }
 
 function renderCandidates() {
@@ -1294,6 +1296,7 @@ window.deck.onImportProgress(p => {
   if (!box || box.hidden) return;
   const pct = Math.round(p.done / Math.max(1, p.total) * 100);
   const src = p.source === 'chapter' ? '（视频章节）'
+    : p.source === 'description' ? '（视频简介）'
     : p.source === 'comment' ? '（评论区）'
     : p.source === 'single' ? '（单曲）' : '';
   box.innerHTML = `<div class="pbar"><i style="width:${pct}%"></i></div>`
@@ -1323,6 +1326,10 @@ const HK_LABELS = {
 
 function fillSettings() {
   const s = S.settings, hk = s.hotkeys || {};
+  $('#sStartupView').value = s.startupView === 'folder' ? 'folder' : 'library';
+  $('#sStartupFolder').innerHTML = allFolders().map(f => `<option value="${esc(f.id)}">${esc(f.name)}</option>`).join('');
+  $('#sStartupFolder').value = allFolders().some(f => f.id === s.startupFolderId) ? s.startupFolderId : LIKED_ID;
+  $('#sStartupFolderRow').hidden = $('#sStartupView').value !== 'folder';
   $('#sPort').value = s.port || 9222;
   $('#sBrowser').value = s.browserPath || '';
   $('#sPrefer360p').checked = s.prefer360p !== false;
@@ -1343,6 +1350,7 @@ function fillSettings() {
   }).catch(() => {});
 }
 
+$('#sStartupView').addEventListener('change', e => { $('#sStartupFolderRow').hidden = e.target.value !== 'folder'; });
 $('#btnSaveSettings').addEventListener('click', async () => {
   const hotkeys = {};
   $$('[data-hk]').forEach(i => hotkeys[i.dataset.hk] = i.value.trim());
@@ -1350,6 +1358,8 @@ $('#btnSaveSettings').addEventListener('click', async () => {
     await window.deck.setSettings({
       port: Number($('#sPort').value) || 9222,
       browserPath: $('#sBrowser').value.trim(),
+      startupView: $('#sStartupView').value,
+      startupFolderId: $('#sStartupFolder').value || LIKED_ID,
       prefer360p: $('#sPrefer360p').checked,
       albumClickPlay: $('#sAlbumClickPlay').checked,
       skipHidden: $('#sSkipHidden').checked,
@@ -1555,9 +1565,10 @@ $('#popMenu').addEventListener('click', async e => {
   const pm = e.target.closest('[data-pm]');
   if (pm) {
     const key = pm.dataset.pm;
+    const sourceId = $('#popMenu').dataset.modeSource || null;
     hidePop();
     try {
-      await window.deck.setPlayMode(key);
+      await window.deck.setPlayMode(key, sourceId);
       queueSig = '';
       const m = (S.playModes || []).find(x => x.key === key);
       toast(`播放顺序：${m ? m.label : key}`);
@@ -1658,7 +1669,7 @@ $('#popMenu').addEventListener('click', async e => {
     hidePop();
     const a = S.albums.find(x => x.bvid === (it && it.bvid)) || S.albums.find(x => x.id === (it && it.albumId));
     if (!a) return;
-    if (action === 'play') window.deck.playAt(a.id, 0);
+    if (action === 'play') window.deck.playAt(a.id, 0, true);
     if (action === 'edit') openEditAlbum(a);
     if (action === 'chapters') {
       if ((a.tracks || []).length === 0) { fillTracksFromChapters(a); return; }
@@ -1853,13 +1864,21 @@ function openEditAlbum(a) {
 function receiveState(packet) {
   const next = decodeState(packet);
   if (!next) return;
+  if (!initializedView) {
+    initializedView = true;
+    viewMode = next.settings.startupView === 'folder' ? 'folder' : 'library';
+    if (next.folders.some(f => f.id === next.settings.startupFolderId)) activeFolderId = next.settings.startupFolderId;
+  }
   const dataChanged = S.albums !== next.albums || S.folders !== next.folders || S.settings !== next.settings;
+  const changedMode = S.playModes !== next.playModes || S.queue?.mode !== next.queue.mode ||
+    S.queue?.source?.id !== next.queue.source?.id || S.queue?.source?.name !== next.queue.source?.name;
   const changedSelection = S.current.albumId !== next.current.albumId || S.current.trackIndex !== next.current.trackIndex ||
     S.playing?.album?.id !== next.playing?.album?.id || S.playing?.trackIndex !== next.playing?.trackIndex;
   S = next;
   if (dataChanged) { indexLibrary(); sideSig = ''; listSig = ''; queueSig = ''; }
   window.__stateGot = (window.__stateGot || 0) + 1;
-  render(!dataChanged && !changedSelection);
+  if (changedMode && popAnchor === $('#btnPlayMode')) hidePop();
+  render(!dataChanged && !changedSelection && !changedMode);
 }
 window.deck.onState(receiveState);
 window.deck.state().then(receiveState).catch(e => toast('初始化失败：' + e.message));

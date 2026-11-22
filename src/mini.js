@@ -44,10 +44,10 @@ $('#mvClose').addEventListener('click', () => window.deck.toggleMini());
 async function cycleMode() {
   const modes = (lastState && lastState.playModes) || [];
   if (!modes.length) return;
-  const cur = (lastState.settings && lastState.settings.playMode) || 'all-loop';
+  const cur = lastState.queue?.mode || 'all-loop';
   const i = modes.findIndex(m => m.key === cur);
   const next = modes[(i + 1) % modes.length];
-  try { await window.deck.setPlayMode(next.key); } catch (_) {}
+  try { await window.deck.setPlayMode(next.key, lastState.queue?.source?.id ?? null); } catch (_) {}
 }
 $('#mvMode').addEventListener('click', cycleMode);
 $('#mMode').addEventListener('click', cycleMode);
@@ -169,10 +169,12 @@ function receiveState(packet) {
 
   /* 播放顺序按钮（完整样式 + MP3样式共用同一套图标） */
   const modes = s.playModes || [];
-  const modeKey = (s.settings && s.settings.playMode) || 'all-loop';
+  const modeKey = s.queue?.mode || 'all-loop';
   const modeMeta = modes.find(m => m.key === modeKey) || { label: '全专循环' };
-  renderModeBtn($('#mMode'), modeKey, modeMeta.label);
-  renderModeBtn($('#mvMode'), modeKey, modeMeta.label);
+  const sourceName = s.queue?.source?.name;
+  const label = sourceName ? `${sourceName} · ${modeMeta.label}` : modeMeta.label;
+  renderModeBtn($('#mMode'), modeKey, label);
+  renderModeBtn($('#mvMode'), modeKey, label);
 }
 window.deck.onState(receiveState);
 

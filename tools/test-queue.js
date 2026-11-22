@@ -115,8 +115,9 @@ test('歌曲夹：最后一首收藏歌曲结束就回到第一首，无需等�
 });
 
 test('歌曲夹：单曲循环始终重播所点歌曲', async () => {
-  const f = fixture('one');
+  const f = fixture();
   await f.deck.playFolderItem('songs', f.song('A', 0));
+  f.deck.setPlayMode('one', 'songs');
   await f.poll('A', 101);
   assert.deepEqual({ ...f.data.current }, { albumId: 'A', trackIndex: 0 });
   assert.deepEqual(f.commands.at(-1), { albumId: 'A', t: 0 });
@@ -177,12 +178,42 @@ test('专辑夹：专内随机队列只含所点专辑，播放一轮后也不�
   }
 });
 
-test('歌曲夹：专内循环仍只播放收藏的歌曲，不补入所在专辑的其他歌曲', async () => {
+test('歌曲夹：列表循环独立于专辑循环，只包含收藏的歌曲', async () => {
   const f = fixture('album-loop');
   await f.deck.playFolderItem('songs', f.song('A', 0));
+  assert.equal(f.data.queue.mode, 'all-loop');
   assert.deepEqual(f.queue(), ['A:0', 'A:2', 'B:1']);
   await f.poll('A', 101);
   assert.deepEqual({ ...f.data.current }, { albumId: 'A', trackIndex: 2 });
+});
+
+test('播放方式随在播来源，浏览和切换收藏夹各自保留选择', async () => {
+  const f = fixture('album-loop');
+  await f.deck.playFolderItem('songs', f.song('A', 0));
+  const songLabels = () => Array.from(f.deck.snapshot().playModes, m => m.label);
+  assert.deepEqual(songLabels(), ['单曲循环', '列表循环', '随机播放']);
+  const queueBefore = f.data.queue;
+  f.deck.selectAlbum('C');
+  f.deck.ensureQueue();
+  assert.equal(f.data.queue, queueBefore);
+  assert.deepEqual(songLabels(), ['单曲循环', '列表循环', '随机播放']);
+  assert.throws(() => f.deck.setPlayMode('once', 'songs'), /不支持/);
+  f.deck.setPlayMode('song-shuffle', 'songs');
+  assert.equal(f.data.settings.playMode, 'album-loop');
+  for (let i = 0; i < 7; i++) {
+    await f.deck.nextTrack();
+    assert.deepEqual(f.queue().sort(), ['A:0', 'A:2', 'B:1']);
+    assert.equal(f.data.queue.mode, 'song-shuffle');
+  }
+  await f.deck.playFolderItem('albums', f.song('A', 0));
+  assert.equal(f.data.queue.mode, 'album-loop');
+  assert.equal(f.deck.snapshot().playModes.length, 7);
+  assert.throws(() => f.deck.setPlayMode('one', 'songs'), /已切换/);
+  await f.deck.playFolderItem('songs', f.song('A', 0));
+  assert.equal(f.data.queue.mode, 'song-shuffle');
+  await f.deck.playAt('A', 0, { fromLibrary: true });
+  assert.equal(f.data.queue.source, undefined);
+  assert.equal(f.data.queue.mode, 'album-loop');
 });
 
 test('曲库：正常顺序播放也按当前队列推进，整库末尾回到开头', async () => {
@@ -389,7 +420,7 @@ test('浏览器手动暂停在最后半秒且 ended=false，不自动跳歌或�
 
 test('播完即停：本曲结束后暂停，保留曲目和队列，不自动接歌', async () => {
   const f = fixture('once');
-  await f.deck.playFolderItem('songs', f.song('A', 0));
+  await f.deck.playFolderItem('albums', f.song('A', 0));
   assert.deepEqual(f.queue(), ['A:0']);
   await f.poll('A', 100.2);
   assert.equal(f.commands.length, 1);
@@ -501,6 +532,8 @@ test('升级移除旧自动播放配置，保留曲库、播放方式和其他�
       assert.equal('autoPlay' in store.settings, false);
       assert.deepEqual(store.albums, albums);
       assert.equal(store.settings.playMode, 'album-loop');
+      assert.equal(store.settings.songFolderPlayMode, 'all-loop');
+      assert.equal(store.settings.startupView, 'library');
       assert.equal(store.settings.skipHidden, false);
       store.patchSettings({ autoPlay: true, miniVisible: false });
       const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -508,6 +541,15 @@ test('升级移除旧自动播放配置，保留曲库、播放方式和其他�
       assert.equal(saved.settings.miniVisible, false);
       assert.deepEqual(saved.albums, albums);
     }
+    fs.writeFileSync(file, JSON.stringify({ settings: { playMode: 'album-shuffle' } }));
+    const upgraded = new Store(dir);
+    assert.equal(upgraded.settings.songFolderPlayMode, 'song-shuffle');
+    upgraded.patchSettings({ playMode: 'once', songFolderPlayMode: 'one', startupView: 'folder', startupFolderId: 'folder-xyz' });
+    const reopened = new Store(dir);
+    assert.equal(reopened.settings.playMode, 'once');
+    assert.equal(reopened.settings.songFolderPlayMode, 'one');
+    assert.equal(reopened.settings.startupView, 'folder');
+    assert.equal(reopened.settings.startupFolderId, 'folder-xyz');
   } finally {
     if (fs.existsSync(file)) fs.unlinkSync(file);
     fs.rmdirSync(dir);

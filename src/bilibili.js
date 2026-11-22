@@ -1,6 +1,6 @@
 /**
- * B 站公开数据层：视频信息 / 合集·系列 / 评论时间戳 / 文本解析
- * 纯 Node 模块，不依赖 Electron，可单独用 `node tools/test-api.js` 测试。
+ * B 站公开数据层：视频信息 / 合集·系列 / 曲目识别 / 文本解析
+ * 纯 Node 模块，不依赖 Electron。
  */
 'use strict';
 
@@ -90,6 +90,7 @@ async function getVideoInfo(bvid) {
     cid: d.cid,
     title: d.title,
     duration: d.duration,
+    description: d.desc || (d.desc_v2 || []).map(part => part.raw_text || '').join(''),
     pic: d.pic,
     mid: d.owner && d.owner.mid,
     author: d.owner && d.owner.name,
@@ -238,6 +239,15 @@ function toSeconds(v) {
 
 /* ---------------- 评论 ---------------- */
 
+function commentFields(r) {
+  return {
+    id: String(r.rpid_str || r.rpid || ''),
+    message: r.content?.message || '',
+    like: r.like || 0,
+    mid: String(r.mid || r.member?.mid || '')
+  };
+}
+
 async function getComments(aid) {
   const out = [];
   // 兼容三个评论接口，取第一个成功的
@@ -250,12 +260,20 @@ async function getComments(aid) {
     try {
       const j = await jget(p, { signed: p.includes('/wbi/') });
       if (j.code !== 0 || !j.data) continue;
-      const push = (r, isTop) => r && r.content && r.content.message && out.push({
-        message: r.content.message,
-        like: r.like || 0,
-        isTop: !!isTop,
-        mid: r.mid
-      });
+      const push = (r, isTop) => {
+        if (!r?.content?.message) return;
+        const fields = commentFields(r);
+        const previews = (r.replies || []).map(commentFields);
+        const replyCount = Math.max(Number(r.rcount) || 0, previews.length);
+        const existing = fields.id && out.find(c => c.id === fields.id);
+        if (existing) {
+          existing.isTop ||= isTop;
+          existing.replyCount = Math.max(existing.replyCount, replyCount);
+          if (previews.length > existing.previews.length) existing.previews = previews;
+        } else {
+          out.push({ ...fields, isTop, previews, replyCount });
+        }
+      };
       const top = j.data.upper && j.data.upper.top;
       if (top) push(top, true);
       (j.data.top_replies || j.data.top || []).forEach(r => push(r, true));
@@ -266,15 +284,38 @@ async function getComments(aid) {
   return out;
 }
 
-/** 从评论文本里挑出最像「曲目表」的一条：时间戳行数最多，置顶优先 */
-function pickTracklistComment(comments, upMid) {
+/** 只展开选中的曲目楼；列表里的 replies 通常只是预览。 */
+async function getTracklistReplies(aid, comment) {
+  const replies = [...comment.previews];
+  if (!comment.id || replies.length >= comment.replyCount) return replies;
+  const seen = new Set(replies.map(r => r.id).filter(Boolean));
+  const size = 20;
+  for (let page = 1; page <= 5; page++) {
+    const query = new URLSearchParams({ type: 1, oid: aid, root: comment.id, pn: page, ps: size });
+    const j = await jget('/x/v2/reply/reply?' + query, { timeout: 5000 }).catch(() => null);
+    if (j?.code !== 0 || !j.data?.replies?.length) break;
+    for (const r of j.data.replies) {
+      const fields = commentFields(r);
+      if (fields.id && seen.has(fields.id)) continue;
+      if (fields.id) seen.add(fields.id);
+      replies.push(fields);
+    }
+    const total = Number(j.data.page?.count ?? comment.replyCount);
+    if (page * size >= total) break;
+  }
+  return replies;
+}
+
+/** 曲目表优先采用置顶或 UP 主发布的楼层。 */
+function pickTracklistComment(comments, upMid, duration) {
   let best = null;
   for (const c of comments) {
-    const count = (c.message.match(/(?:\d{1,2}:)?\d{1,2}:\d{2}/g) || []).length;
+    const tracks = parseTimestamps(c.message, duration, { automatic: true });
+    const count = tracks.length;
     if (count < 2) continue;
     let score = count * 10 + (c.isTop ? 1000 : 0) + Math.min(c.like, 300) / 10;
-    if (upMid && c.mid === upMid) score += 500;
-    if (!best || score > best.score) best = { ...c, score, count };
+    if (upMid && String(c.mid) === String(upMid)) score += 500;
+    if (!best || score > best.score) best = { ...c, score, count, tracks };
   }
   return best;
 }
@@ -282,6 +323,7 @@ function pickTracklistComment(comments, upMid) {
 /* ---------------- 时间戳文本解析 ---------------- */
 
 const TIME_RE = /(?<![\d:])(\d{1,2}:)?(\d{1,2}):(\d{2})(?!\d)/g;
+const TIME_BRACKETS = { '[': ']', '【': '】', '［': '］', '(': ')', '（': '）' };
 
 function parseTime(h, m, s) {
   return (h ? parseInt(h.replace(':', ''), 10) * 3600 : 0) + parseInt(m, 10) * 60 + parseInt(s, 10);
@@ -294,20 +336,30 @@ function parseTime(h, m, s) {
  *   1. 【坏天气】05:01  /  On The Road(Demo1) 00:00
  *   1:05:30 歌名（小时制）
  */
-function parseTimestamps(text, videoDuration = 0) {
+function parseTimestamps(text, videoDuration = 0, { automatic = false } = {}) {
   const lines = String(text || '').replace(/\r/g, '').split('\n');
   const raw = [];
   for (const line of lines) {
     const matches = [...line.matchAll(TIME_RE)];
-    if (!matches.length) continue;
-    // 一行里出现多个时间戳时，取最后一个作为起点（前面往往是编号/歌词）
+    if (automatic && (matches.length !== 1 || /https?:\/\//i.test(line))) continue;
     for (const mt of matches) {
+      if (Number(mt[3]) >= 60 || (mt[1] && Number(mt[2]) >= 60)) continue;
       const start = parseTime(mt[1], mt[2], mt[3]);
-      let name = (line.slice(0, mt.index) + ' ' + line.slice(mt.index + mt[0].length)).trim();
+      if (automatic && videoDuration > 0 && start >= videoDuration) continue;
+      let before = line.slice(0, mt.index).trim();
+      let after = line.slice(mt.index + mt[0].length).trim();
+      const closer = TIME_BRACKETS[before.slice(-1)];
+      if (closer && after.startsWith(closer)) {
+        before = before.slice(0, -1).trimEnd();
+        after = after.slice(1).trimStart();
+      }
+      // 自动识别只接受行首或行尾的时间，避免把简介正文里的时间当曲目。
+      if (automatic && before && after && !/^\d{1,3}[.、．)）]$/.test(before)) continue;
+      let name = (before + ' ' + after).trim();
       name = name
         .replace(/^\s*(?:置顶|UP主|楼主)\s*[:：]?\s*/, '')
-        .replace(/^\s*\d{1,2}\s*[.、．)）]\s*/, '')
         .replace(/^[\s\-—–·|]+/, '')
+        .replace(/^\s*\d{1,3}\s*[.、．)）]\s*/, '')
         .replace(/[\s\-—–·|]+$/, '')
         .replace(/\s{2,}/g, ' ')
         .trim();
@@ -316,7 +368,10 @@ function parseTimestamps(text, videoDuration = 0) {
       for (const [l, r] of pairs) {
         if (name.startsWith(l) && name.endsWith(r)) { name = name.slice(l.length, -r.length).trim(); break; }
       }
-      if (!name || /^[\d\s:：.、\-—]+$/.test(name)) name = `曲目 ${raw.length + 1}`;
+      if (!name || /^[\d\s:：.、\-—]+$/.test(name)) {
+        if (automatic) continue;
+        name = `曲目 ${raw.length + 1}`;
+      }
       raw.push({ name, start });
     }
   }
@@ -430,6 +485,29 @@ async function searchVideos(keyword) {
   }));
 }
 
+async function findTracklist(video, comments) {
+  const { aid, mid, duration, description } = video;
+  const fromDescription = parseTimestamps(description, duration, { automatic: true });
+  const root = pickTracklistComment(comments, mid, duration);
+  let fromComments = root?.tracks || [];
+  if (root) {
+    const replies = await getTracklistReplies(aid, root);
+    const lastStart = fromComments.at(-1).start;
+    const continuations = replies
+      .filter(r => r.mid && (r.mid === root.mid || r.mid === String(mid)))
+      .flatMap(r => parseTimestamps(r.message, duration, { automatic: true }))
+      .filter(t => t.start > lastStart);
+    fromComments = finalizeTracks([...fromComments, ...continuations], duration);
+  }
+  if (fromDescription.length >= 2 && fromDescription.length > fromComments.length) {
+    return { tracks: fromDescription, source: 'description' };
+  }
+  if (fromComments.length) return { tracks: fromComments, source: 'comment' };
+  const chapters = await getChapters(video).catch(() => []);
+  if (chapters.length) return { tracks: chapters, source: 'chapter' };
+  return { tracks: [{ name: cleanTrackName(video.title), start: 0, end: duration }], source: 'single' };
+}
+
 /** 给一批视频抓曲目表（并发受限，避免风控） */
 async function buildAlbumsFromArchives(archives, onProgress = () => {}, concurrency = 3) {
   const results = new Array(archives.length);
@@ -439,41 +517,25 @@ async function buildAlbumsFromArchives(archives, onProgress = () => {}, concurre
       const i = cursor++;
       const a = archives[i];
       try {
-        let aid = a.aid, duration = a.duration;
-        if (!aid) { const info = await getVideoInfo(a.bvid); aid = info.aid; duration = duration || info.duration; }
-
-        // 1) 先看评论区置顶的时间戳
-        let tracks = [], source = '';
-        try {
-          const best = pickTracklistComment(await getComments(aid));
-          if (best) {
-            const parsed = parseTimestamps(best.message, duration);
-            if (parsed.length >= 2) { tracks = parsed; source = 'comment'; }
-          }
-        } catch (_) { /* 评论拿不到就继续试章节 */ }
-
-        // 2) 评论里没有（或太少）就回退到视频自带章节
-        if (tracks.length < 2) {
-          const chapters = await getChapters({ bvid: a.bvid, aid, duration });
-          if (chapters.length >= 2) { tracks = chapters; source = 'chapter'; }
-        }
-
-        // 3) 仍然没有 → 整个视频当作一首单曲（名字用视频标题），保证可播放
-        if (!tracks.length) {
-          if (!duration) {
-            try { const info = await getVideoInfo(a.bvid); duration = info.duration || 0; } catch (_) {}
-          }
-          tracks = [{ name: cleanTrackName(a.title), start: 0, end: duration || 0 }];
-          source = 'single';
-        }
+        const [info, comments] = await Promise.all([
+          a.description !== undefined && a.aid ? a : getVideoInfo(a.bvid).catch(err => {
+            if (!a.aid) throw err;
+            return a;  // 简介拿不到时仍可尝试评论和视频章节。
+          }),
+          a.aid ? getComments(a.aid) : null
+        ]);
+        const aid = info.aid || a.aid;
+        const duration = info.duration || a.duration || 0;
+        const video = { ...a, ...info, aid, duration };
+        const { tracks, source } = await findTracklist(video, comments || await getComments(aid));
 
         results[i] = {
           id: 'a_' + Date.now().toString(36) + '_' + i,
-          title: cleanAlbumTitle(a.title),
+          title: cleanAlbumTitle(video.title),
           bvid: a.bvid,
           aid,
           duration,
-          pic: a.pic,
+          pic: video.pic,
           tracks,
           tracksSource: source,
           tracksOk: tracks.length >= 1

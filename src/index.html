@@ -88,10 +88,14 @@
             <button class="ctrl" id="btnNext" title="下一首"><svg viewBox="0 0 24 24"><path d="M17 5v14M6 6l9 6-9 6z"/></svg></button>
             <button class="ctrl" id="btnNextAlbum" title="下一张专辑"><svg viewBox="0 0 24 24"><path d="M18 5v14M5 6l9 6-9 6z"/></svg></button>
             <span class="ctrl-sep"></span>
-            <button class="chip heart-chip" id="btnLikeNow" title="一键红心：加入歌曲收藏夹「喜欢」">♡ 红心</button>
-            <button class="chip" id="btnFavNow" title="一键收藏：加入指定收藏夹">☆ 收藏</button>
+            <button class="chip icon-chip heart-chip" id="btnLikeNow" title="加入「喜欢」" aria-label="喜欢" aria-pressed="false">♡</button>
+            <button class="chip icon-chip star-chip" id="btnFavNow" title="选择收藏夹" aria-label="选择收藏夹" aria-haspopup="true">☆</button>
             <button class="chip" id="btnOpenBili">在 B 站打开</button>
             <button class="chip" id="btnEditAlbum">编辑曲目</button>
+            <div class="now-tools">
+              <button class="mode-btn" id="btnPlayMode" title="选择播放顺序" aria-haspopup="true"></button>
+              <button class="btn ghost small" id="btnQueue" title="打开播放列表" aria-controls="queuePanel">☰ 播放列表</button>
+            </div>
           </div>
         </div>
       </section>
@@ -101,10 +105,6 @@
           <strong id="listTitle">曲目列表</strong><span id="trackCount"></span>
           <button class="btn ghost small" id="btnAddTrack">＋ 加入单曲</button>
           <button class="btn ghost small" id="btnSort" hidden title="调整顺序：拖拽条目改变播放顺序">⇅ 调整顺序</button>
-        </div>
-        <div class="head-tools" id="headTools">
-          <button class="mode-btn" id="btnPlayMode" title="点一下切换播放顺序"></button>
-          <button class="btn ghost small" id="btnQueue" title="打开播放列表">☰ 播放列表</button>
         </div>
         <div class="folder-tools" id="folderTools" hidden>
           <button class="btn ghost small" id="btnPickItems">＋ 加入单曲</button>
@@ -180,7 +180,7 @@
       </div>
       <div class="import-progress" id="importProgress" hidden></div>
       <div class="modal-foot">
-        <span class="muted" id="buildHint">选择视频后，会自动读取置顶评论里的曲目时间戳</span>
+        <span class="muted" id="buildHint">勾选后自动识别评论、楼中楼、简介和视频章节中的曲目</span>
         <button class="btn ghost" id="btnBuildFav" disabled title="先选收藏夹，再把勾选的视频导入并放进这个收藏夹">＋ 导入到收藏夹</button>
         <button class="btn primary" id="btnBuild" disabled>抓取时间戳并导入</button>
       </div>
@@ -209,6 +209,16 @@
       </div>
       <button class="btn ghost small" id="btnPickBrowser">浏览选择浏览器 exe…</button>
       <p class="muted small-note">专用浏览器使用独立配置目录，首次打开需登录一次 B 站。修改端口后请重新启动浏览器。</p>
+
+      <h3>启动页面</h3>
+      <div class="form-grid">
+        <label>启动时显示
+          <select id="sStartupView"><option value="library">资料库</option><option value="folder">收藏夹</option></select>
+        </label>
+        <label id="sStartupFolderRow" hidden>默认收藏夹
+          <select id="sStartupFolder"></select>
+        </label>
+      </div>
 
       <h3>播放</h3>
       <div class="toggles">

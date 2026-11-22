@@ -10,7 +10,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 let exe = path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe');
 if (!fs.existsSync(exe)) exe = path.join(root, 'node_modules', 'electron', 'dist', 'electron');
 if (!fs.existsSync(exe)) {
-  console.error('源码包缺少 Electron 运行时。请先运行 npm install，或下载 GitHub Releases 中的 Windows 便携包。');
+  console.error('源码包缺少 Electron 运行时。请先运行 npm install，或下载 GitHub Releases 中的 Windows 安装程序。');
   console.error('下载地址：https://github.com/kenaziuuu/AlbumDeck/releases/latest');
   process.exit(1);
 }

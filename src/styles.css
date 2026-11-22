@@ -22,7 +22,7 @@ body {
   font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Segoe UI", system-ui, sans-serif;
   font-size: 13px; overflow: hidden; user-select: none;
 }
-button, input, textarea { font-family: inherit; font-size: inherit; color: inherit; }
+button, input, select, textarea { font-family: inherit; font-size: inherit; color: inherit; }
 button { cursor: pointer; }
 input, textarea { user-select: text; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -121,7 +121,7 @@ input, textarea { user-select: text; }
   background: #0c0f17; border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px 8px 31px; width: 100%; outline: none;
 }
 .inline-form input, .candidate-head input { padding-left: 11px; }
-input:focus, textarea:focus { border-color: var(--pink) !important; }
+input:focus, select:focus, textarea:focus { border-color: var(--pink) !important; }
 input::placeholder, textarea::placeholder { color: #4e586d; }
 
 .album-list { flex: 1; overflow-y: auto; min-height: 0; margin: 0 -4px; padding: 0 4px; }
@@ -168,7 +168,7 @@ input::placeholder, textarea::placeholder { color: #4e586d; }
 .bar-fill { height: 100%; width: 0%; border-radius: 6px; background: linear-gradient(90deg, var(--violet), var(--pink)); transition: width .25s linear; }
 .bar-handle { position: absolute; top: -3px; left: 0; width: 11px; height: 11px; border-radius: 50%; background: #fff; box-shadow: 0 0 8px rgba(251,114,153,.8); transform: translateX(-50%); transition: left .25s linear; }
 .times { display: flex; justify-content: space-between; color: var(--dim); font-size: 10.5px; margin-top: 5px; font-variant-numeric: tabular-nums; }
-.controls { display: flex; align-items: center; gap: 8px; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .ctrl { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: #1b2130; display: grid; place-items: center; transition: .15s; }
 .ctrl svg { width: 15px; height: 15px; fill: #c8d0e0; stroke: #c8d0e0; stroke-width: 1.4; }
 .ctrl:hover { background: #293246; border-color: #46526c; }
@@ -177,6 +177,8 @@ input::placeholder, textarea::placeholder { color: #4e586d; }
 .ctrl-sep { width: 1px; height: 20px; background: var(--line); margin: 0 6px; }
 .chip { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 6px 10px; font-size: 11px; transition: .15s; }
 .chip:hover { color: #fff; border-color: #46526c; }
+.icon-chip { width: 29px; height: 29px; padding: 0; font-size: 16px; line-height: 1; }
+.chip.star-chip.on { color: var(--violet); }
 
 /* ── 曲目列表 ── */
 .tracks-head { display: flex; justify-content: space-between; align-items: center; margin: 18px 2px 8px; }
@@ -260,10 +262,11 @@ input::placeholder, textarea::placeholder { color: #4e586d; }
 .tab-pane.active { display: block; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px; }
 label { display: block; color: #aeb9cc; font-size: 11.5px; }
-label input, textarea {
+label input, label select, textarea {
   display: block; width: 100%; margin-top: 6px; background: #0c0f17; border: 1px solid var(--line);
   border-radius: 9px; padding: 8px 10px; outline: none; transition: .15s;
 }
+label select { color-scheme: dark; }
 textarea { resize: vertical; line-height: 1.65; font-size: 12px; }
 .full-label { margin-bottom: 12px; }
 .muted { color: var(--dim); font-weight: 400; font-size: 11px; }
@@ -384,14 +387,14 @@ textarea { resize: vertical; line-height: 1.65; font-size: 12px; }
 .folder-tools { display: flex; gap: 6px; }
 
 /* ── 播放顺序按钮 ── */
-.head-tools { display: flex; align-items: center; gap: 8px; }
+.now-tools { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .mode-btn {
   display: flex; align-items: center; gap: 6px; background: #1a2030; border: 1px solid var(--line);
   color: #cbd4e4; border-radius: 8px; padding: 5px 10px; font-size: 11px; transition: .15s; white-space: nowrap;
 }
 .mode-btn:hover { border-color: #46526c; color: #fff; }
 .mode-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.mode-btn .mscope { color: var(--dim); font-size: 9.5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; }
+.mode-btn .mscope { max-width: 92px; overflow: hidden; text-overflow: ellipsis; color: var(--dim); font-size: 9.5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 3px; }
 
 /* ── 播放列表抽屉 ── */
 .content { position: relative; }

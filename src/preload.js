@@ -24,11 +24,11 @@ contextBridge.exposeInMainWorld('deck', {
   launch: () => call('conn:launch'),
   browserPath: () => call('conn:browserPath'),
 
-  playAt: (albumId, index) => call('play:at', { albumId, index }),
+  playAt: (albumId, index, fromLibrary = false) => call('play:at', { albumId, index, fromLibrary }),
   selectAlbum: albumId => call('play:select', { albumId }),
   next: () => call('play:next'),
   prev: () => call('play:prev'),
-  setPlayMode: mode => call('play:setMode', mode),
+  setPlayMode: (mode, sourceId) => call('play:setMode', { mode, sourceId }),
   nextAlbum: () => call('play:albumNext'),
   prevAlbum: () => call('play:albumPrev'),
   togglePlay: () => call('play:toggle'),

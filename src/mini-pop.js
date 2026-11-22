@@ -43,11 +43,11 @@ function favHtml() {
 
 function modeHtml() {
   const modes = (S && S.playModes) || [];
-  const cur = (S && S.settings && S.settings.playMode) || 'all-loop';
+  const cur = S?.queue?.mode || 'all-loop';
   return modes.map(m => `<button class="pi ${m.key === cur ? 'on' : ''}" data-mode="${esc(m.key)}">
     <span class="ico">${m.key === cur ? '✓' : ''}</span>
     <span class="name">${esc(m.label)}</span>
-    <span class="num">${esc(m.scope || '')}</span>
+    <span class="num">${esc(S?.queue?.source && m.scope === '全库' ? '收藏夹' : m.scope || '')}</span>
   </button>`).join('');
 }
 
@@ -93,7 +93,8 @@ function render() {
   const qq = (S && S.queue) || {};
   const qsrc = qq.source && qq.source.kind === 'folder' ? qq.source : null;
   $('#ppSub').textContent = KIND === 'queue'
-    ? (qsrc ? `收藏夹「${qsrc.name}」 · ${(qq.items || []).length} 首` : `${(qq.items || []).length} 首`) : '';
+    ? (qsrc ? `收藏夹「${qsrc.name}」 · ${(qq.items || []).length} 首` : `${(qq.items || []).length} 首`)
+    : KIND === 'mode' ? qsrc?.name || '' : '';
   $('#ppBody').innerHTML = KIND === 'fav' ? favHtml() : (KIND === 'mode' ? modeHtml() : queueHtml());
   // 每次打开都把正在播放的专辑滚到面板顶部
   if (KIND === 'queue') requestAnimationFrame(scrollToCurrent);
@@ -163,7 +164,7 @@ $('#ppBody').addEventListener('click', async e => {
   }
   const md = e.target.closest('[data-mode]');
   if (md) {
-    try { await window.deck.setPlayMode(md.dataset.mode); } catch (_) {}
+    try { await window.deck.setPlayMode(md.dataset.mode, S?.queue?.source?.id ?? null); } catch (_) {}
     close();
     return;
   }
